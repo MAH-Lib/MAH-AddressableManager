@@ -1,0 +1,39 @@
+{
+  "name": "com.github.mah-lib.addressable-manager",
+  "version": "1.0.0",
+  "description": "A module that manages Unity Addressables from loading to releasing in one place. Work with just LoadAsync / Release; anything you forget to release is reclaimed automatically when its lifetime (Manual / Scene / Owner) ends. Also includes initialization, download, loading by Label, and Editor tools for inspection.",
+  "displayName": "MAH-AddressableManager",
+  "unity": "6000.0",
+  "license": "MIT",
+  "changelogUrl": "https://github.com/MAH-Lib/MAH-AddressableManager/blob/main/CHANGELOG.md",
+  "hideInEditor": false,
+  "author": {
+    "name": "MAH-Lib",
+    "url": "https://github.com/MAH-Lib/MAH-AddressableManager"
+  },
+  "keywords": [
+    "Addressable",
+    "Unity",
+    "Editor"
+  ],
+  "dependencies": {
+    "com.unity.addressables": "2.9.0"
+  },
+  "samples": [
+    {
+      "displayName": "Load and Release",
+      "description": "Check loading and releasing of Prefab, Sprite, Audio, and Label batches, together with the differences between lifetimes (Manual / Scene / Owner).",
+      "path": "Samples~/AddressableLoad"
+    },
+    {
+      "displayName": "Initialize",
+      "description": "Check the initialization state transitions and how to receive completion and failure (await and events).",
+      "path": "Samples~/AddressableInitialize"
+    },
+    {
+      "displayName": "Download",
+      "description": "Check update checks, getting the download size, and downloading with progress.",
+      "path": "Samples~/AddressableDownload"
+    }
+  ]
+}

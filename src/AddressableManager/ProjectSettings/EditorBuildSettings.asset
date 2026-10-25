@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes:
+  - enabled: 1
+    path: Assets/@MAH/MAH-AddressableManager/Samples/AddressableLoad/Scenes/SpriteLoadScene.unity
+    guid: 5a6fa9c2e02334ddb8ddade1acc38db2
+  - enabled: 1
+    path: Assets/@MAH/MAH-AddressableManager/Samples/AddressableLoad/Scenes/AudioLoadScene.unity
+    guid: 538e318aae0b647a59ef346aa53bad4b
+  - enabled: 1
+    path: Assets/@MAH/MAH-AddressableManager/Samples/AddressableLoad/Scenes/PrefabLoadScene.unity
+    guid: aeb5b8f3432b748179937fa28c11efa5
+  - enabled: 1
+    path: Assets/@MAH/MAH-AddressableManager/Samples/AddressableLoad/Scenes/LabelLoadScene.unity
+    guid: 928fcae9621b449c19f2388789c8df0c
+  m_configObjects:
+    com.unity.addressableassets: {fileID: 11400000, guid: ad950a1d1380e4faabf398c202f39aeb, type: 2}
+    com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  m_UseUCBPForAssetBundles: 0

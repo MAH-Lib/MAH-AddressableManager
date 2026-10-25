@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aeb41a196d7584613b41c7a66aeeb2bb, type: 3}
+  m_Name: InitializeManualSettings
+  m_EditorClassIdentifier: MAH.AddressableManager::MAH.AddressableManager.Core.AddressableRuntimeSettingsSO
+  _logLevel: 0
+  _initialize:
+    _mode: 1
+    _loadBeforeInitialize: 0
+    _autoReleaseHandle: 1
+    _enableCatalogCacheBusting: 0
+  _loading:
+    _enableOwnerPolling: 1
+    _ownerPollingIntervalSec: 3
+    _maxRetry: 3
+    _retryDelayMs: 1000

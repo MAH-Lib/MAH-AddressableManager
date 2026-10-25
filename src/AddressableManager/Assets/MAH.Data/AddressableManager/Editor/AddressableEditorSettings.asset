@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e5c50a8c519fc4e7483e1e8ab2702da4, type: 3}
+  m_Name: AddressableEditorSettings
+  m_EditorClassIdentifier: MAH.AddressableManager.Editor::MAH.AddressableManager.Editor.SettingsSync.AddressableEditorSettingsSO
+  _debugWindow:
+    _refreshIntervalSec: 0.5
+  _leakLog:
+    _outputFolder: Logs/AddressableManager
+    _exportOnExitPlayMode: 1
+  _registration:
+    _autoRegistration: 1
+    _logDetail: 0
+    _defaultAddressTemplate: '{Asset.Path}'
+    _defaultLabels: []
+    _defaultExcludePatterns:
+    - '**/_Test/**'
+    - '**/Editor/**'
+    _defaultGroupTemplate: {fileID: 11400000, guid: 29440e7abe8674df0b64c0ac33cef9d1, type: 2}
+  _dependencyCheck:
+    _outputFolder: Logs/AddressableManager

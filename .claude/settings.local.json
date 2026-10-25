@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /Users/mouriaki_1/Unity/UnityProject/AddressableManager && grep -n \"\\\\]\\(\\\\.\\\\./\\\\|\\\\]\\(specs/\\\\|\\\\]\\(\\\\.\\\\./\\\\.\\\\./\" Docs/specs/*.md Docs/diagrams/*.md Docs/addressable-manager-design.md)",
+      "Read(//Users/mouriaki_1/Unity/UnityProject/AddressableManager/**)"
+    ]
+  }
+}
