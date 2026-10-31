@@ -109,3 +109,6 @@ InitTestScene*.unity*
 !MAH-AddressableManager/Samples~/
 # Claude のスキルはPC側（~/.claude/skills/）を使うためコミットしない
 .claude/skills/
+
+# macOS
+.DS_Store
