@@ -21,7 +21,7 @@ A general-purpose module that manages Unity Addressables from loading to releasi
 - Check for and download content updates per Label. Includes getting the "count and size" for a confirmation dialog, retries on failure, and progress notifications
 - Load assets of different types together by specifying a Label, and release them together
 - The `[AddressablePath]` / `[AddressableLabel]` attributes let you pick addresses and Labels from a dropdown in the Inspector (preventing typos from manual input)
-- Asynchronous code is built around UniTask (installing it via UPM switches to the UniTask version automatically). Projects without UniTask run on `Task`
+- Asynchronous code is built around UniTask (installing it via UPM switches to the UniTask version automatically). Projects without UniTask run on `Awaitable`
 - No dependency on external libraries such as DI containers (VContainer, etc.) or R3
 - Includes a debug window for checking loading state, leaks, and Owner reclaiming, and a window that shows where and how much assets not registered in Addressables are used, without entering Play mode or building ([Editor Tools](#editor-tools))
 
@@ -31,7 +31,7 @@ A general-purpose module that manages Unity Addressables from loading to releasi
 | --- | --- |
 | Unity | Tested with 6000.3.26f1 |
 | Addressables | Tested with 2.10.3 |
-| UniTask (optional, recommended) | 2.5.0 or later. **Must be installed via UPM** (if installed with a `.unitypackage`, it is not recognized and the Task version is used) |
+| UniTask (optional, recommended) | 2.5.0 or later. **Must be installed via UPM** (if installed with a `.unitypackage`, it is not recognized and the Awaitable version is used) |
 
 ## Installation
 
@@ -74,7 +74,7 @@ Add the following to `dependencies` in your project's `Packages/manifest.json`. 
 
 ## Usage
 
-Code examples use the UniTask version. In projects without UniTask, the return type is `Task` instead of `UniTask` (the way you call it is the same).
+Code examples use the UniTask version. In projects without UniTask, the return type is `Awaitable` instead of `UniTask` (the way you call it is the same).
 
 ### 1. Create the settings asset
 

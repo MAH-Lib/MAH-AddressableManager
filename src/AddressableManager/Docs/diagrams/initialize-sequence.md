@@ -20,11 +20,11 @@ sequenceDiagram
     M->>C: Tick を購読
     Note over M,C: Addressables が初期化済みだと、開始と同時（Awake の中）に完了して<br/>イベントが発火する。利用者の購読は Awake の後になるため、<br/>購読時に AccIsInitialized も確認する
     M->>C: StartAutoInitialize()（結果は待たず、Controller が例外を観測する）
-    Note over C: 共有タスクを作って NotStarted → Running
+    Note over C: 共有完了を作って NotStarted → Running
     C->>S: StartInitialize(autoReleaseHandle)
     U->>H: await InitializeAsync(progress, ct)
     H->>C: InitializeAsync(progress, ct)
-    C-->>H: 実行中の共有タスク（新しく始めない）
+    C-->>H: 実行中の共有完了（新しく始めない）
     loop LateUpdate ごと
         M->>C: Tick(unscaledDeltaTime)
         C->>U: progress.Report(PercentComplete)
@@ -32,7 +32,7 @@ sequenceDiagram
     S-->>C: 完了（成功）
     Note over C: 状態 Running → Succeeded・待っている全員に進捗 1
     C->>U: OnSucceeded（Handler の OnInitialized の購読者へ直接）
-    C-->>H: 共有タスク完了（状態遷移とイベントの後）
+    C-->>H: 共有完了へ結果を渡す（状態遷移とイベントの後）
     H-->>U: await が戻る
 ```
 
@@ -49,14 +49,14 @@ sequenceDiagram
     Note over D: Awake の後も状態は NotStarted
     U->>H: await InitializeAsync(progress, ct)
     H->>C: InitializeAsync(progress, ct)
-    C->>D: MarkRunning(共有タスク)
-    Note over C,D: 共有タスクを先に作って Running にしてから Service を呼ぶ<br/>（同期で完了しても Running を経由する）
+    C->>D: MarkRunning(共有完了)
+    Note over C,D: 共有完了を先に作って Running にしてから Service を呼ぶ<br/>（同期で完了しても Running を経由する）
     C->>S: StartInitialize(autoReleaseHandle)
     S-->>C: 失敗（操作の失敗、または同期の例外）
     C->>D: MarkFailed(AddressableInitializeException)
     Note over D: 状態 Running → Failed（終端）
     C->>U: OnFailed(ex)（Handler の OnInitializeFailed の購読者へ直接）
-    C-->>H: AddressableInitializeException（共有タスクの失敗）
+    C-->>H: AddressableInitializeException（共有完了の失敗）
     H-->>U: AddressableInitializeException
     U->>H: InitializeAsync()（2回目）
     H->>C: InitializeAsync()

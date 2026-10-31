@@ -21,7 +21,7 @@ Unity Addressables の読み込み〜解放を一括管理する汎用モジュ�
 - 更新データの確認・ダウンロードを Label 単位で行える。確認ダイアログ用の「件数・容量」の取得、失敗時のリトライ、進捗の通知を備える
 - Label を指定して、型の異なるアセットをまとめて読み込み・まとめて解放できる
 - `[AddressablePath]` / `[AddressableLabel]` 属性で、アドレス・Label を Inspector のプルダウンから選べる（手入力によるタイポを防ぐ）
-- 非同期処理は UniTask を前提とする（UPM で導入すると自動で UniTask 版になる）。UniTask が無いプロジェクトでは `Task` で動作する
+- 非同期処理は UniTask を前提とする（UPM で導入すると自動で UniTask 版になる）。UniTask が無いプロジェクトでは `Awaitable` で動作する
 - DI コンテナ（VContainer 等）・R3 のような外部ライブラリに依存しない
 - 読み込み状態・リーク・Owner の回収を確認できるデバッグウィンドウと、Addressables に未登録のアセットがどこでどのくらい使われているかを Play もビルドもせずに確認できるウィンドウを備える（[Editor ツール](#editor-ツール)）
 
@@ -31,7 +31,7 @@ Unity Addressables の読み込み〜解放を一括管理する汎用モジュ�
 | --- | --- |
 | Unity | 6000.3.26f1 で動作確認 |
 | Addressables | 2.10.3 で動作確認 |
-| UniTask（任意・推奨） | 2.5.0 以上・**UPM 経由での導入が必須**（`.unitypackage` で導入すると認識されず、Task 版で動作する） |
+| UniTask（任意・推奨） | 2.5.0 以上・**UPM 経由での導入が必須**（`.unitypackage` で導入すると認識されず、Awaitable 版で動作する） |
 
 ## 導入
 
@@ -74,7 +74,7 @@ UniTask を使う場合は、**先に UniTask を UPM で導入**してくださ
 
 ## 使い方
 
-コードの例は UniTask 版で記載しています。UniTask が無いプロジェクトでは、戻り値が `UniTask` の代わりに `Task` になります（呼び出し方は同じです）。
+コードの例は UniTask 版で記載しています。UniTask が無いプロジェクトでは、戻り値が `UniTask` の代わりに `Awaitable` になります（呼び出し方は同じです）。
 
 ### 1. 設定アセットを作る
 

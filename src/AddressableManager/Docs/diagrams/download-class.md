@@ -73,8 +73,8 @@ classDiagram
     class IInitializationGate {
         <<interface>>
         +AccIsOpen : bool
-        +WaitUntilOpenAsync(ct) Task
-        +WaitUntilInitializedAsync(ct) Task
+        +WaitUntilOpenAsync(ct) UniTask/Awaitable
+        +WaitUntilInitializedAsync(ct) UniTask/Awaitable
     }
     class InitializeController
     class AddressableDownloadSettings {
@@ -110,7 +110,7 @@ classDiagram
 - `IInitializationGate` は `Runtime/Core/Interfaces/`（共通物）に置く。Initialize・Loading・Download から参照されるため（initialize-spec 7.4）。`WaitUntilInitializedAsync` は Download 用で、`LoadBeforeInitializePolicy` に関係なく、初期化の成功まで待つ
 - `DownloadStatusModel` は `Runtime/Core/Download/Model/` に置く。触るのは DownloadController だけ。**遷移のたびに `DownloadStatus`（`readonly struct`）を作り直して保持する**ため、`AccStatus` は取得した時点の値のコピーになる。結果（`Completed` / `Failed` / `Canceled`）の記録後と、実行中でないときの遷移は、何も変えず `false` を返す（最後の通知を1回だけにするため。download-spec 7.2）
 - `End()` は、通知先を外し、実行中を解除する。最後の通知を届けた後に、`finally` から呼ぶ（download-spec 7.3）
-- `IAddressablesDownloadService` が、Addressables を呼ぶ唯一の層。非同期の戻り値は、UniTask が導入されていれば UniTask、無ければ Task。`GetDownloadBytes` は、handle の状態確認を伴うため、アクセサではなくメソッド（conventions 2章）。ダウンロード中でなければ、最後に読んだ値を返す
+- `IAddressablesDownloadService` が、Addressables を呼ぶ唯一の層。非同期の戻り値は、UniTask が導入されていれば UniTask、無ければ Awaitable。`GetDownloadBytes` は、handle の状態確認を伴うため、アクセサではなくメソッド（conventions 2章）。ダウンロード中でなければ、最後に読んだ値を返す
 - `AddressableHandler` は `Runtime/Core/Handler/`（namespace `MAH.AddressableManager.Core`）に置く。Handler は設定を持たないため、Label なし版は `null` を渡し、DownloadController が Runtime SO の Label に解決する（download-spec 7.1）
 
 ## 2. 公開する型と設定

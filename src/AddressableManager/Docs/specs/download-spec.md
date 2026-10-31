@@ -203,8 +203,8 @@ public interface IAddressableHandler
     UniTask<bool> HasUpdateAsync(CancellationToken ct = default);
     UniTask<bool> HasUpdateAsync(IReadOnlyList<string> labels, CancellationToken ct = default);
 #else
-    Task<bool> HasUpdateAsync(CancellationToken ct = default);
-    Task<bool> HasUpdateAsync(IReadOnlyList<string> labels, CancellationToken ct = default);
+    Awaitable<bool> HasUpdateAsync(CancellationToken ct = default);
+    Awaitable<bool> HasUpdateAsync(IReadOnlyList<string> labels, CancellationToken ct = default);
 #endif
 
     /// <summary> カタログを確認・更新し、ダウンロードが必要な件数と容量を返す </summary>
@@ -212,8 +212,8 @@ public interface IAddressableHandler
     UniTask<DownloadCheckResult> CheckUpdateAsync(CancellationToken ct = default);
     UniTask<DownloadCheckResult> CheckUpdateAsync(IReadOnlyList<string> labels, CancellationToken ct = default);
 #else
-    Task<DownloadCheckResult> CheckUpdateAsync(CancellationToken ct = default);
-    Task<DownloadCheckResult> CheckUpdateAsync(IReadOnlyList<string> labels, CancellationToken ct = default);
+    Awaitable<DownloadCheckResult> CheckUpdateAsync(CancellationToken ct = default);
+    Awaitable<DownloadCheckResult> CheckUpdateAsync(IReadOnlyList<string> labels, CancellationToken ct = default);
 #endif
 
     /// <summary> 対象 Label のアセットをダウンロードする。progress には段階・バイト数・割合・リトライ回数が届く </summary>
@@ -221,15 +221,15 @@ public interface IAddressableHandler
     UniTask DownloadAsync(IProgress<DownloadStatus> progress = null, CancellationToken ct = default);
     UniTask DownloadAsync(IReadOnlyList<string> labels, IProgress<DownloadStatus> progress = null, CancellationToken ct = default);
 #else
-    Task DownloadAsync(IProgress<DownloadStatus> progress = null, CancellationToken ct = default);
-    Task DownloadAsync(IReadOnlyList<string> labels, IProgress<DownloadStatus> progress = null, CancellationToken ct = default);
+    Awaitable DownloadAsync(IProgress<DownloadStatus> progress = null, CancellationToken ct = default);
+    Awaitable DownloadAsync(IReadOnlyList<string> labels, IProgress<DownloadStatus> progress = null, CancellationToken ct = default);
 #endif
 }
 ```
 
 - 引数なしの版は SO の `_labels` を対象にする。引数に `labels` を渡す版は、SO の設定を上書きする（ゲーム内の追加ダウンロード用）
 - **`ct` は呼び出し元の待機を打ち切る**。キャンセルすると段階は `Canceled` になる（2.5）。**カタログの更新中（`UpdatingCatalog`）だけは、更新が終わってから反映される**（`Canceled` でもカタログは更新済みになり得る）
-- Label を渡す版に `null` を渡すと `ArgumentNullException`。**呼び出し時には投げず、`await` の時点で届く**（Controller の検証エラーと同じ。Handler が失敗した Task / UniTask を返す）
+- Label を渡す版に `null` を渡すと `ArgumentNullException`。**呼び出し時には投げず、`await` の時点で届く**（Controller の検証エラーと同じ。Handler が失敗した UniTask / Awaitable を返す）
 - **`DownloadAsync(null)` は、`IProgress` 版と `IReadOnlyList` 版のどちらにも当てはまり、コンパイルエラー（CS0121）になる**。進捗だけを渡すときは `progress:`、Label だけを渡すときは `labels:` の名前付き引数を付ける（`DownloadAsync(progress: _receiver, ct: ct)` のように）
 - `HasUpdateAsync` / `CheckUpdateAsync` は `IProgress` を受け取らない。実行中の状態は `AccDownloadStatus` で読める
 
@@ -343,10 +343,10 @@ await task;                                              // 例外はここで�
 |---|---|---|---|
 | `AddressableManager` | `Runtime/Core/` | `MAH.AddressableManager` | 合成ルート。`DownloadStatusModel` の生成と注入、DownloadController の生成・`Dispose`、`LateUpdate` の中継（`OnLateUpdate += / -=` を対で書く）。ロジックは持たない |
 | `IAddressableHandler` | `Runtime/Core/Interfaces/` | `MAH.AddressableManager` | 利用者の唯一の入口（外部依存型）。ダウンロードの API（4章）を含む |
-| `AddressableHandler` | `Runtime/Core/Handler/` | `MAH.AddressableManager.Core` | `IAddressableHandler` の実装。状態を持たず、`DownloadController` へ転送する。引数なし版は Label に `null` を渡し（Controller が SO の Label に解決する。Handler は設定を持たない）、引数あり版は `labels` が `null` なら、`ArgumentNullException` で失敗した Task / UniTask を返す（呼び出し時には投げず、`await` の時点で届く。Controller では `null` が「SO の Label を使う」を意味するため） |
+| `AddressableHandler` | `Runtime/Core/Handler/` | `MAH.AddressableManager.Core` | `IAddressableHandler` の実装。状態を持たず、`DownloadController` へ転送する。引数なし版は Label に `null` を渡し（Controller が SO の Label に解決する。Handler は設定を持たない）、引数あり版は `labels` が `null` なら、`ArgumentNullException` で失敗した UniTask / Awaitable を返す（呼び出し時には投げず、`await` の時点で届く。Controller では `null` が「SO の Label を使う」を意味するため） |
 | `DownloadController` | `Runtime/Core/Download/Controller/` | `MAH.AddressableManager.Core.Download` | 確認・判定・ダウンロードの実行、`DownloadStatusModel` を使った状態遷移、リトライ、進捗の通知、`Tick`、`Dispose`。Label の解決（`labels` が `null` なら SO の Label、空なら例外。2.5）と検証もここで行う。ピュア C# |
 | `DownloadStatusModel` | `Runtime/Core/Download/Model/` | `MAH.AddressableManager.Core.Download` | 状態（段階・バイト数・リトライ回数）・実行中フラグ・進捗の通知先を持つ Model（7.2）。Addressables・設定は知らない。ピュア C# |
-| `IAddressablesDownloadService` / `AddressablesDownloadService` | `Runtime/Core/Download/Service/` | `MAH.AddressableManager.Core.Download` | Addressables の呼び出し（`CheckForCatalogUpdatesAsync`・`UpdateCatalogsAsync`・`CalculateDownloadSizeAsync`・`StartDownloadAsync`・`GetDownloadBytes`・`ReleaseDownloadHandle`）。EditMode テストで偽物に差し替えるためにインターフェースを挟む。非同期の戻り値は、UniTask が導入されていれば UniTask、無ければ Task（共有タスクではないため）。handle の完了待ちは、どちらでも `TaskCompletionSource` で作った Task を await する |
+| `IAddressablesDownloadService` / `AddressablesDownloadService` | `Runtime/Core/Download/Service/` | `MAH.AddressableManager.Core.Download` | Addressables の呼び出し（`CheckForCatalogUpdatesAsync`・`UpdateCatalogsAsync`・`CalculateDownloadSizeAsync`・`StartDownloadAsync`・`GetDownloadBytes`・`ReleaseDownloadHandle`）。EditMode テストで偽物に差し替えるためにインターフェースを挟む。非同期の戻り値は、UniTask が導入されていれば UniTask、無ければ Awaitable。handle の完了待ちの実装は実装時に決める（`Task` は使わない） |
 | `DownloadSizeInfo` | `Runtime/Core/Download/Service/` | `MAH.AddressableManager.Core.Download` | Service → Controller の受け渡し用の struct（`BundleCount`・`TotalBytes`） |
 | `AddressableDownloadSettings` と `CatalogUpdatePolicy` | `Runtime/Core/Download/Data/` | `MAH.AddressableManager.Core.Download` | 設定値（3章） |
 | `DownloadPhase` / `DownloadStatus` / `DownloadCheckResult` | `Runtime/Core/Download/Data/` | `MAH.AddressableManager` | 段階・状態・確認結果。利用者が戻り値・引数として触るため外部依存型 |
@@ -393,13 +393,17 @@ DownloadController に渡す設定は `AddressableDownloadSettings` だけ（Run
 internal interface IInitializationGate
 {
     /// <summary> 初期化の成功まで待つ。LoadBeforeInitializePolicy に関係なく待つ。未開始は InvalidOperationException、失敗は AddressableInitializeException </summary>
-    Task WaitUntilInitializedAsync(CancellationToken ct);
+#if ADDRESSABLE_UNITASK_SUPPORT
+    UniTask WaitUntilInitializedAsync(CancellationToken ct);
+#else
+    Awaitable WaitUntilInitializedAsync(CancellationToken ct);
+#endif
 }
 ```
 
 - InitializeController が実装し、Manager が DownloadController のコンストラクタに注入する。DownloadController が知っているのはこのインターフェースだけで、`MAH.AddressableManager.Core.Initialize` を `using` しない
-- 戻り値は、Task / UniTask のシンボルに関係なく常に `Task`（共有タスクを待つため。設計仕様書 3.5.1）
-- 状態ごとの動作は5章の表のとおり（成功済み→すぐ完了／実行中→共有タスクの完了を待つ／未開始→`InvalidOperationException`／失敗→Model が持つ例外）。`WaitUntilOpenAsync`（Loading 用）とは別で、**`Failed` 以外では PassThrough でも待つ**点が異なる
+- 呼び出しごとに、待ち手専用の `await` できる値を返す（初期化の共有完了を待つため。設計仕様書 3.5.1）
+- 状態ごとの動作は5章の表のとおり（成功済み→すぐ完了／実行中→共有完了を待つ／未開始→`InvalidOperationException`／失敗→Model が持つ例外）。`WaitUntilOpenAsync`（Loading 用）とは別で、**`Failed` 以外では PassThrough でも待つ**点が異なる
 - EditMode テストでは、偽のゲート（`FakeInitializationGate`）に同じメソッドを持たせる
 
 ### 7.5 handle の扱いと Service
@@ -407,9 +411,9 @@ internal interface IInitializationGate
 - `DownloadDependenciesAsync` は **`autoReleaseHandle: false`** で呼び、`Tick` でバイト数を読めるようにする（Service の `GetDownloadBytes`。内部で handle の `GetDownloadStatus()` を読み、ダウンロード中でなければ最後に読んだ値を返す）。**完了・失敗の経路は Service の `try/finally`、キャンセル・`Dispose` の経路は `ReleaseDownloadHandle()` で、`Addressables.Release` する**。待機をやめた古い呼び出しが後から再開しても、新しいダウンロードの handle を解放しないよう、渡された handle と保持している handle が一致するときだけ保持を外す。同じ理由で、**古い呼び出しは、完了後の `GetDownloadStatus()` の読み取りと、最後に読んだバイト数の書き込みもしない**（解放済みの handle を読む例外と、新しいダウンロードの値の上書きを避けるため。handle が有効で、保持しているものと一致するときだけ行う）。利用者から handle は見えない
 - **完了したら、すぐ解放する**。`DownloadDependenciesAsync` の操作は、ダウンロードしたバンドルを handle を解放するまで読み込んだまま持ち、解放するまではそのバンドルからアセットを Load できない（Addressables 2.9.1 の `DownloadDependenciesAsync` のドキュメントコメント「The returned handle must be released before Assets can be loaded from the downloaded bundles.」）。解放しても、ダウンロードしたファイルはキャッシュに残る
 - 確認（`CheckForCatalogUpdates`）・更新（`UpdateCatalogs`）・サイズ計算（`LoadResourceLocationsAsync`）の handle も、結果を読んだらすぐ解放する
-- 結果（成功・失敗・例外）は、**`Completed` コールバックの中で読み**、`TaskCompletionSource` に渡す（`AddressablesInitializeService` と同じ形）。`AsyncCompat.ToTask` は UniTask 版では定義されないため使わない
+- 結果（成功・失敗・例外）は、**`Completed` コールバックの中で読み**、待っている処理へ渡す（`AddressablesInitializeService` と同じ形。渡し方は実装時に決める）
 - 呼んだ時点で操作が完了済み（`IsDone`）なら、`Completed` を待たずにその場で結果を読む
-- Addressables が同期で投げた例外も、Service が捕まえて失敗した Task として Controller に渡す
+- Addressables が同期で投げた例外も、Service が捕まえて失敗として Controller に渡す
 - Service に渡すコールバックはフィールドにキャッシュした delegate を使い、Label の一覧を毎回 `ToList()` しない
 
 ### 7.6 進捗（`Tick`）
@@ -443,7 +447,7 @@ internal interface IInitializationGate
 | 進捗の通知をイベントにしない | `+=` と `-=` を対で書く必要があり、解除漏れが起きる。どの呼び出しの進捗か区別もできない |
 | `DownloadStatus` を `readonly struct` にして、取得・通知のたびにコピーを渡す | 取得した値が後から変わらないため、前の処理の結果を表示している側が、次の処理で 0 に戻った値を誤って読むことが構造上起きない。「無効」の段階を持たずに済み、GC も起きない。失うのは「1回取得して持てば更新され続ける」手軽さだけで、`Update` で毎回 `AccDownloadStatus` を読む形で足りる |
 | 状態を `DownloadStatusModel` に分ける | 状態データ（段階・バイト数・実行中・通知先）を Controller の処理と分け、遷移の条件を Model の遷移メソッドで守るため。Initialize・Loading と同じく Manager から注入する |
-| ダウンロードの実行は同時に1つだけにする | 状態を1つに保つため。複数の呼び出し元が待つ共有タスクを作らずに済み、`Task` と UniTask の差も生まれない |
+| ダウンロードの実行は同時に1つだけにする | 状態を1つに保つため。複数の呼び出し元が待つ共有完了を作らずに済み、UniTask と Awaitable の差も生まれない |
 | 最後の通知を、通知先を外す前に届ける | 外した後では通知が届かず、成功・失敗・キャンセルを区別できなくなるため（7.3） |
 | 失敗の例外を `DownloadStatus` に持たせない | 受け取る経路を呼び出し元の `await` の1つにするため。控えた値に例外とスタックトレースが残るのも避ける |
 | リトライを段階ごとに数える | カタログの確認・更新で使った回数が、ダウンロードのリトライ回数を減らさないようにするため。UI には、現在の段階での再試行の回数が見える |
@@ -491,7 +495,7 @@ Manager が、初期化の完了後に DownloadController を呼ぶ形にする�
 
 - DownloadController・Model・Service はピュア C# に保つ（`MonoBehaviour` を継承しない。Unity のライフサイクルは Manager から中継する）
 - `DownloadStatusModel` は Controller の中で `new` しない（Manager から注入する）
-- 非同期は UniTask が正で、UniTask が無い場合だけ Task を使う。違いは、公開 API のシグネチャの `#if ADDRESSABLE_UNITASK_SUPPORT` と `AsyncCompat` に閉じ込め、UniTask を `#if` の外で `using` しない。`IInitializationGate`・Service の共有的な戻り値は、UniTask 導入時も `Task` のままにする（設計仕様書 3.5.1）
+- 非同期は UniTask が正で、UniTask が無い場合だけ Awaitable を使う。`Task` は使わない。違いは、シグネチャの `#if ADDRESSABLE_UNITASK_SUPPORT` と `AsyncCompat` に閉じ込め、UniTask を `#if` の外で `using` しない。複数の待ち手は共有完了で扱う（設計仕様書 3.5.1）
 - 時間待ちは `AsyncCompat.Delay`、キャンセル付き待機は `AsyncCompat.WithCancellation` を使う（`UniTask.Delay` を直接呼ぶと、ポーズ中〔`timeScale = 0`〕に待機が終わらない）
 - `Core/Download/` から `Core/Initialize/`・`Core/Loading/` を `using` しない。共有が必要なものは `Core/` 直下に置く
 - 最後の通知は、通知先を外す前に届ける（7.3）。すべての経路で handle を解放する（7.5）

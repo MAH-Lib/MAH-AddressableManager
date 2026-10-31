@@ -88,7 +88,7 @@
 | 初期化モード | Initialize Mode | `InitializeMode`（`Auto` / `Manual`） | 内部 | 初期化を Manager の `Awake` で自動で始めるか、`InitializeAsync` の呼び出しで始めるかの設定 |
 | 自動初期化 | Auto Initialize | `InitializeMode.Auto` | 外部 | Manager の `Awake` で初期化を始めること。利用者は Handler の `InitializeAsync` で実行中の初期化を待てる |
 | 初期化の状態 | Initialize State | `InitializeState`（`NotStarted` / `Running` / `Succeeded` / `Failed`） | 外部 | 初期化の進行状態。Handler の `AccInitializeState` で参照する。`Succeeded` / `Failed` は終端（以降は変化しない） |
-| 初期化の状態モデル | Initialize State Model | `InitializeStateModel` | 内部 | 初期化の状態・失敗の例外・共有タスク・進捗の通知先を保持する Model。Manager が生成して InitializeController に注入する |
+| 初期化の状態モデル | Initialize State Model | `InitializeStateModel` | 内部 | 初期化の状態・失敗の例外・共有完了・進捗の通知先を保持する Model。Manager が生成して InitializeController に注入する |
 | 初期化失敗 | Initialize Failure | `AddressableInitializeException` | 外部 | 初期化に失敗したことを示す例外。Addressables の例外を `InnerException` に入れる。失敗した後はアプリを再起動するまで初期化をやり直せず、以降の `InitializeAsync` と Load もこの例外になる |
 | 初期化前の Load の扱い | Load Before Initialize | `LoadBeforeInitializePolicy`（`PassThrough` / `WaitForInitialize`） | 内部 | 初期化が成功する前の Load を、そのまま通すか、初期化の完了まで待たせるかの設定。既定は `PassThrough`。初期化に失敗した後は、どちらでも Load を止める |
 | 初期化ゲート | Initialization Gate | `IInitializationGate` | 内部 | Loading が「読み込んでよいか（待つ必要があるか）／待つ」を、Download が「初期化の成功まで待つ」を問い合わせる共通インターフェース。InitializeController が実装し、Manager が LoadingController・DownloadController に注入する。Controller 同士を参照させないために `Core/` 直下に置く |
@@ -143,14 +143,14 @@
 | 日本語 | 英語 | コード上の命名 | 公開 | 説明 |
 |--------|------|---------------|------|------|
 | UniTask | UniTask | `UniTask`, `UniTask<T>` | 外部 | **正とする非同期型**。Unity のライフサイクルに組み込まれ、GC アロケーションが発生しにくい。必須の依存にはせず、`#if` の外で `using` は書かない（3.5.1） |
-| Task | Task | `Task`, `Task<T>` | 外部 | UniTask が導入されていない場合の代替の非同期型（.NET 標準）。共有タスクは UniTask 導入時もこれを使う（3.5.1） |
-| 共有タスク | Shared Task | `AssetEntryModel.AccLoadTask`、`InitializeStateModel` の共有タスク | 内部 | 複数の呼び出し元が待つタスク。何度 `await` しても安全なよう、UniTask 導入時も `Task` で持つ（3.5.1） |
-| シグネチャの出し分け | Conditional Signature | `#if ADDRESSABLE_UNITASK_SUPPORT` | 内部 | UniTask 版（`#if` 側）と代替の Task 版（`#else` 側）の API を切り替える方式。呼び出し側は `await` で使う限り違いを意識しない |
+| Awaitable | Awaitable | `Awaitable`, `Awaitable<T>` | 外部 | UniTask が導入されていない場合の代替の非同期型（Unity 6.0 以上の標準機能）。UniTask と同じく1回しか `await` できない。`Task` は使わない（3.5.1） |
+| 共有完了 | Shared Completion | `SharedCompletion`（暫定）、`AssetEntryModel.AccLoadTask`、`InitializeStateModel` の共有完了 | 内部 | 複数の呼び出し元が待つ処理の完了を表すもの。`await` できる値を共有せず、待ち手ごとに値を作って結果を配る（3.5.1） |
+| シグネチャの出し分け | Conditional Signature | `#if ADDRESSABLE_UNITASK_SUPPORT` | 内部 | UniTask 版（`#if` 側）と代替の Awaitable 版（`#else` 側）の API を切り替える方式。呼び出し側は `await` で使う限り違いを意識しない |
 | コンパイルシンボル（UniTask） | Compile Symbol | `ADDRESSABLE_UNITASK_SUPPORT` | 内部 | UniTask 2.5.0 以上が UPM で導入されている場合に自動定義される |
 | Version Defines | Version Defines | — | 内部 | asmdef の機能で、パッケージの存在に応じてシンボルを自動定義する。**UPM 経由のパッケージにのみ反応する**（3.5.1・罠） |
-| キャンセル付き待機 | With Cancellation | `AsyncCompat.WithCancellation` | 内部 | Task / UniTask の差を吸収する薄いヘルパー。キャンセル待機の実装はここに集約する |
+| キャンセル付き待機 | With Cancellation | `AsyncCompat.WithCancellation` | 内部 | UniTask / Awaitable の差を吸収する薄いヘルパー。キャンセル待機の実装はここに集約する |
 | 実時間での待機 | Realtime Delay | `AsyncCompat.Delay` | 内部 | リトライ等の時間待ち。ポーズ中（`timeScale = 0`）も進むよう実時間で待つ。`UniTask.Delay` を直接呼ばない（3.5.1） |
-| ブリッジ | Bridge | `AsyncOperationHandle.ToTask` | 内部 | `AsyncOperationHandle` を `Task` に変換する処理。`TaskCompletionSource` で完了イベントを待ち受ける |
+| ブリッジ | Bridge | `handle.ToUniTask()`（Awaitable 版は実装時に確定） | 内部 | `AsyncOperationHandle` を `await` できる形に変換する処理。Awaitable 版は `AwaitableCompletionSource` で完了イベントを待ち受ける |
 | キャンセルトークン | Cancellation Token | `CancellationToken ct` | 外部 | 実行時にしか決まらないため SO ではなく引数で渡す |
 | メインスレッド前提 | Main Thread Only | — | 内部 | Addressables の継続がメインスレッド前提であるため、ロックを取らない設計にしている（3.4） |
 

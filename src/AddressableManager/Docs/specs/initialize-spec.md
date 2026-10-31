@@ -25,7 +25,7 @@
 AddressableManager（合成ルート。機能内クラスの生成・寿命管理・ライフサイクルの中継。公開は AccHandler のみ）
 ├─ AddressableHandler    … 利用者の唯一の入口（IAddressableHandler）。初期化の API を InitializeController へ転送する
 ├─ InitializeController  … 本書。初期化の実行と状態遷移
-│    ├─ InitializeStateModel … 初期化の状態・失敗の例外・共有タスク（Manager が生成して注入する）
+│    ├─ InitializeStateModel … 初期化の状態・失敗の例外・共有完了（Manager が生成して注入する）
 │    └─ Service           … Addressables.InitializeAsync の呼び出し／URL キャッシュ対策
 └─ LoadingController     … 読み込み・解放（loading-spec.md）
      └─ IInitializationGate を通して「読み込んでよいか」だけを問い合わせる（InitializeController は知らない）
@@ -70,7 +70,7 @@ AddressableManager（合成ルート。機能内クラスの生成・寿命管�
 | `Running` → `Failed` | `Addressables.InitializeAsync` の操作が失敗した、または呼び出しが同期で例外を投げた |
 
 - `Succeeded` / `Failed` からは遷移しない。この制約は `InitializeStateModel` の遷移メソッドが守る（Controller が誤って遷移させようとしても状態は変わらない）
-- `Failed` になった後、InitializeController は **`Addressables.InitializeAsync` を二度と呼ばない**。呼ぶと Addressables が `ArgumentOutOfRangeException` を同期で投げるため（10.1）。以降の `InitializeAsync` は、失敗した共有タスクをそのまま返す
+- `Failed` になった後、InitializeController は **`Addressables.InitializeAsync` を二度と呼ばない**。呼ぶと Addressables が `ArgumentOutOfRangeException` を同期で投げるため（10.1）。以降の `InitializeAsync` は、失敗した共有完了をそのまま返す
 
 状態遷移図は [`diagrams/initialize-sequence.md`](../diagrams/initialize-sequence.md) 4章を参照。
 
@@ -117,7 +117,7 @@ public interface IAddressableHandler
 #if ADDRESSABLE_UNITASK_SUPPORT
     UniTask InitializeAsync(IProgress<float> progress = null, CancellationToken ct = default);
 #else
-    Task InitializeAsync(IProgress<float> progress = null, CancellationToken ct = default);
+    Awaitable InitializeAsync(IProgress<float> progress = null, CancellationToken ct = default);
 #endif
 }
 ```
@@ -139,7 +139,7 @@ public interface IAddressableHandler
 
 ```csharp
 // 自動モード：起動シーンの処理で、初期化の完了を待ってから次へ進む
-private async Task RunSetupAsync(CancellationToken ct)
+private async UniTask RunSetupAsync(CancellationToken ct)
 {
     try
     {
@@ -191,7 +191,7 @@ private void OnDestroy()
 - **`Failed` は両方の設定で同じ扱い**。初期化に失敗した後は Addressables 全体が使えず（10.1）、読み込みを試させても Addressables のエラー（キーが無効）で失敗するだけで、原因が初期化の失敗だと分からない。特に `LoadByLabelAsync` は、エラーにならず「該当なし」の Warning と空のまとめチケットになり、失敗に気づけない恐れがある。そのため Addressables を呼ぶ前に止め、初期化の失敗をそのまま伝える。Load から初期化をやり直すことはしない
 - 止まるのは読み込みだけで、`Release` は止めない（失敗の前に受け取ったチケットを解放できるようにするため）
 - `WaitForInitialize` で待っている間に `ct` がキャンセルされたら `OperationCanceledException`、Manager が破棄されたら `ObjectDisposedException`
-  - 破棄されると、ゲートの待機には共有タスクの `OperationCanceledException` が届く（2.3）。LoadingController が `catch` で破棄済み（`_isDisposed`）を確認し、`ObjectDisposedException` に変換して投げる。Load の呼び出し元から見て、破棄後の Load と同じ例外にそろえるため
+  - 破棄されると、ゲートの待機には共有完了の `OperationCanceledException` が届く（2.3）。LoadingController が `catch` で破棄済み（`_isDisposed`）を確認し、`ObjectDisposedException` に変換して投げる。Load の呼び出し元から見て、破棄後の Load と同じ例外にそろえるため
 - 待っている間に寿命が終わった（owner が破棄された・シーンがアンロードされた）ら `OperationCanceledException`（「ロード中に寿命が終了しました」。loading-spec の、ロード中に寿命が終わった場合と同じ扱い）
 
 ### 5.1 Load のどの時点で待つか
@@ -261,7 +261,7 @@ iOS / macOS では、OS の URL キャッシュによって、リモートのカ
 | `IAddressableHandler` | `Runtime/Core/Interfaces/` | `MAH.AddressableManager` | 利用者の唯一の入口（外部依存型）。初期化の API（4章）を含む |
 | `AddressableHandler` | `Runtime/Core/Handler/` | `MAH.AddressableManager.Core` | `IAddressableHandler` の実装。状態を持たず、InitializeController・LoadingController へ転送する。イベントは `add` / `remove` で InitializeController のイベントへ直接つなぐ（7.7）。複数機能を知るため機能フォルダの外に置く。内部実装型 |
 | `InitializeController` | `Runtime/Core/Initialize/Controller/` | `MAH.AddressableManager.Core.Initialize` | 初期化の実行、`InitializeStateModel` を使った状態遷移、進捗の通知、内部イベント（`OnSucceeded` / `OnFailed`）の発火（7.7）、`IInitializationGate` の実装。ピュア C# |
-| `InitializeStateModel` | `Runtime/Core/Initialize/Model/` | `MAH.AddressableManager.Core.Initialize` | 初期化の状態・失敗の例外・共有タスク・進捗の通知先を保持する Model（7.2）。Addressables・設定は知らない。ピュア C# |
+| `InitializeStateModel` | `Runtime/Core/Initialize/Model/` | `MAH.AddressableManager.Core.Initialize` | 初期化の状態・失敗の例外・共有完了・進捗の通知先を保持する Model（7.2）。Addressables・設定は知らない。ピュア C# |
 | `IAddressablesInitializeService` / `AddressablesInitializeService` | `Runtime/Core/Initialize/Service/` | `MAH.AddressableManager.Core.Initialize` | `Addressables.InitializeAsync` の1回の呼び出しと、その handle の進捗・完了の受け渡し。進捗は `GetPercentComplete()`（完了後は 1。handle の状態確認を伴うためアクセサにしない）。EditMode テストで偽物に差し替えるためにインターフェースを挟む |
 | `CatalogCacheBustingService` | `Runtime/Core/Initialize/Service/` | `MAH.AddressableManager.Core.Initialize` | `InternalIdTransformFunc` の連結・復元と、URL の変換（6章）。起動時の値はコンストラクタで受け取る（テストで値を固定するため）。連番は自身で進める |
 | `AddressableInitializeSettings` と enum 群 | `Runtime/Core/Initialize/Data/` | `MAH.AddressableManager.Core.Initialize` | 設定値（3章） |
@@ -279,23 +279,23 @@ InitializeController に渡す設定は `AddressableInitializeSettings` だけ�
 |---|---|
 | 状態 | `InitializeState`（2.3） |
 | 失敗の例外 | `Failed` になったときの `AddressableInitializeException`。`Failed` の後の `InitializeAsync`・ゲートは、毎回これを投げる |
-| 共有タスク | 初期化1回分の処理を表す `Task`（7.3）。Loading の `AssetEntryModel` がロードタスクを持つのと同じ扱い |
+| 共有完了 | 初期化1回分の処理の完了を表す `SharedCompletion`（名前は暫定。7.3）。Loading の `AssetEntryModel` がロードの共有完了を持つのと同じ扱い |
 | 進捗の通知先 | 待っている呼び出し元の `IProgress<float>`（7.6）。リストはフィールドで保持して使い回す |
 
 - 遷移はメソッドで行う：`MarkRunning(task)`（`NotStarted` からのみ）・`MarkSucceeded()`・`MarkFailed(exception)`（どちらも `Running` からのみ）。条件に合わない呼び出しでは状態を変えない。**`Succeeded` / `Failed` が終端であることを Model の側で保証する**
 - Model を直接触るのは InitializeController だけ。Handler の `AccInitializeState` / `AccIsInitialized` は InitializeController を通して読む（隣の層とだけ話す。設計仕様書 2章）
 - LoadingController（将来の DownloadController も）は Model を参照せず、`IInitializationGate`（7.4）を通す。Model は `Core/Initialize/` にあり、他の機能フォルダから参照すると設計違反になるため
 
-### 7.3 共有タスクとキャンセル
+### 7.3 共有完了とキャンセル
 
-- 初期化1回分の処理を**1つの `Task`** にして `InitializeStateModel` に持たせ、`InitializeAsync` の呼び出し元すべてがその `Task` を待つ。UniTask 使用時も、共有するタスクは安全性を優先して `Task` のままにする（複数の呼び出し元が待ち、完了後にも後から呼ばれた `InitializeAsync` が待つため。`Task` は何度 `await` しても安全だが、UniTask は2回目の `await` で例外や別処理の状態の読み取りになり得る。Loading の LoadTask の共有と同じ理由。設計仕様書 3.5.1・loading-spec 6.2）
-- 公開 API の `InitializeAsync` は、共有タスクに `AsyncCompat.WithCancellation(ct)` を付けて返す。呼び出し元の `ct` で打ち切られるのは**その呼び出し元の待機だけ**
+- 初期化1回分の処理を**1つの共有完了（`SharedCompletion`）** にして `InitializeStateModel` に持たせ、`InitializeAsync` の呼び出し元ごとに、待ち手専用の `await` できる値を受け取る（複数の呼び出し元が待ち、完了後にも後から呼ばれた `InitializeAsync` が待つが、UniTask / Awaitable は1回しか `await` できないため。Loading のロードの共有と同じ理由。設計仕様書 3.5.1・loading-spec 6.2）
+- 公開 API の `InitializeAsync` は、共有完了の待機に呼び出し元の `ct` を渡す。打ち切られるのは**その呼び出し元の待機だけ**
 - 初期化そのものを止めるのは、Controller が内部に持つ `CancellationTokenSource` だけで、Manager の破棄（`Dispose`）でキャンセルされる
-- 自動モードの開始は、Manager が `InitializeController.StartAutoInitialize()` を呼ぶだけにする。Controller が `InitializeAsync` を待たずに始め、失敗の例外を観測済みにする（未観測の例外として `TaskScheduler.UnobservedTaskException` に流れないようにするため。失敗の記録・ログは `RunAsync` が行う）。Manager は Task の扱いを持たない
-- `Failed` の後の `InitializeAsync` は、例外を投げ直さず、失敗済みの共有タスクを `await` して同じ例外を返す（投げ直すと、そのたびに同じインスタンスのスタックトレースが上書きされるため）
-- 共有タスクは**1回だけ作る**。`Failed` の後も作り直さず、失敗した共有タスクを返し続ける（2.3）
-- 共有タスクは `TaskCompletionSource` で作り、`MarkRunning` してから Service を呼ぶ。Addressables が初期化済みで同期的に完了しても、`NotStarted → Running → Succeeded` の順序を守るため。完了時は、状態の遷移とイベントの発火（7.7）を先に行い、その後で共有タスクを完了させる（待っていた呼び出し元が再開した時点で、状態とイベントが確定しているようにするため）
-- `Dispose` は、待機中の呼び出し元を共有タスクの `TrySetCanceled` で直接終わらせる（継続の実行順に頼らず、確実に `OperationCanceledException` で終わらせるため）。状態は変えない。待つのをやめた Service のタスクは、後から失敗しても未観測の例外にならないよう観測しておく
+- 自動モードの開始は、Manager が `InitializeController.StartAutoInitialize()` を呼ぶだけにする。Controller が `InitializeAsync` を待たずに始める。`await` されない例外は握りつぶされるため、失敗の記録・ログは `RunAsync` が必ず行う。Manager は非同期型の扱いを持たない
+- `Failed` の後の `InitializeAsync` は、失敗済みの共有完了を待ち、同じ例外を受け取る（スタックトレースの扱いは実装時に確認する。投げ直すと、そのたびに同じインスタンスのスタックトレースが上書きされるため）
+- 共有完了は**1回だけ作る**。`Failed` の後も作り直さず、失敗した共有完了を使い続ける（2.3）
+- 共有完了を作って `MarkRunning` してから Service を呼ぶ。Addressables が初期化済みで同期的に完了しても、`NotStarted → Running → Succeeded` の順序を守るため。完了時は、状態の遷移とイベントの発火（7.7）を先に行い、その後で共有完了へ結果を渡す（待っていた呼び出し元が再開した時点で、状態とイベントが確定しているようにするため）
+- `Dispose` は、待機中の呼び出し元を共有完了のキャンセルで直接終わらせる（継続の実行順に頼らず、確実に `OperationCanceledException` で終わらせるため）。状態は変えない。待つのをやめた Service の処理が後から失敗しても、例外が失われないよう観測の経路を用意する
 
 ### 7.4 Loading との橋渡し（`IInitializationGate`）
 
@@ -306,21 +306,29 @@ internal interface IInitializationGate
     /// <summary> 待たずに Load してよいか（PassThrough で初期化に失敗していない、または初期化に成功済み） </summary>
     bool AccIsOpen { get; }
     /// <summary> Load してよい状態になるまで待つ。未開始（WaitForInitialize）・失敗時は例外（5章の表） </summary>
-    Task WaitUntilOpenAsync(CancellationToken ct);
+#if ADDRESSABLE_UNITASK_SUPPORT
+    UniTask WaitUntilOpenAsync(CancellationToken ct);
+#else
+    Awaitable WaitUntilOpenAsync(CancellationToken ct);
+#endif
     /// <summary> 初期化の成功まで待つ（Download が使う。LoadBeforeInitializePolicy に関係なく待つ）。未開始は InvalidOperationException、失敗は AddressableInitializeException </summary>
-    Task WaitUntilInitializedAsync(CancellationToken ct);
+#if ADDRESSABLE_UNITASK_SUPPORT
+    UniTask WaitUntilInitializedAsync(CancellationToken ct);
+#else
+    Awaitable WaitUntilInitializedAsync(CancellationToken ct);
+#endif
 }
 ```
 
 - **InitializeController が実装し、Manager が LoadingController・DownloadController のコンストラクタに注入する**。どちらも知っているのはこのインターフェースだけで、`MAH.AddressableManager.Core.Initialize` を `using` しない
 - インターフェースを `Core/Interfaces/`（共通物）に置くのは、Initialize（実装する側）と Loading・Download（使う側）の両方から参照されるため。機能フォルダのどれかに置くと、他の機能がその機能フォルダを参照することになり、設計違反になる
-- `WaitUntilInitializedAsync`（2026-10-08 追加。Download 用）は、**設定 `_loadBeforeInitialize` に関係なく、初期化の成功まで待つ**。Download はカタログの確認・更新・ダウンロードに Addressables の初期化が済んでいることを必要とし、「Load は待たないが Download は待つ」を `PassThrough` のままで両立させるため、`WaitUntilOpenAsync` とは別にしている。動作は、成功済み→すぐ完了／実行中→共有タスクの完了を待つ（`AsyncCompat.WithCancellation(ct)` 付き）／未開始→`InvalidOperationException`／失敗→Model が持つ例外。`AccIsOpen` のような「待たずに済むか」の問い合わせは、Download では要らない（Download は常に初期化の成功を待つため）。詳細は [`download-spec.md`](download-spec.md) 5章・7.4
+- `WaitUntilInitializedAsync`（2026-10-08 追加。Download 用）は、**設定 `_loadBeforeInitialize` に関係なく、初期化の成功まで待つ**。Download はカタログの確認・更新・ダウンロードに Addressables の初期化が済んでいることを必要とし、「Load は待たないが Download は待つ」を `PassThrough` のままで両立させるため、`WaitUntilOpenAsync` とは別にしている。動作は、成功済み→すぐ完了／実行中→共有完了を待つ（`ct` 付き）／未開始→`InvalidOperationException`／失敗→Model が持つ例外。`AccIsOpen` のような「待たずに済むか」の問い合わせは、Download では要らない（Download は常に初期化の成功を待つため）。詳細は [`download-spec.md`](download-spec.md) 5章・7.4
 - 判定は InitializeController の中で、`InitializeStateModel` の状態と `_loadBeforeInitialize` を組み合わせて行う。「初期化前・失敗後の Load の扱い」は初期化の設定と状態であり、Loading 側はどちらも知らずに済む
 
 | 状態 | `AccIsOpen`（`PassThrough`） | `AccIsOpen`（`WaitForInitialize`） | `WaitUntilOpenAsync` |
 |---|---|---|---|
 | `NotStarted` | `true` | `false` | `InvalidOperationException` |
-| `Running` | `true` | `false` | 共有タスクの完了を待つ（成功なら完了、失敗なら `AddressableInitializeException`） |
+| `Running` | `true` | `false` | 共有完了を待つ（成功なら完了、失敗なら `AddressableInitializeException`） |
 | `Succeeded` | `true` | `true` | すぐに完了する |
 | `Failed` | **`false`** | `false` | すぐに `AddressableInitializeException`（Model が持つ例外） |
 
@@ -335,9 +343,9 @@ internal interface IInitializationGate
 - 利用者から handle は見えない（チケット・状態・例外だけを公開する方針。glossary 7章）
 - **`Addressables.InitializeAsync` が同期で投げる例外も、Service が捕まえて失敗として Controller に渡す**。手動＋`PassThrough` で、Load がきっかけの Addressables の自動初期化が先に失敗していると、後から呼んだ `InitializeAsync` は `ArgumentOutOfRangeException` を同期で投げる（10.1）。これも `Failed` にして、以降の Load をゲートで止める
 
-**結果を読む時機と Task への変換**：
+**結果を読む時機と await できる形への変換**：
 - 結果（`Status`・`OperationException`）は、**`Completed` コールバックの中で読む**。完了通知の間は Addressables が操作の参照を保っているため、`autoReleaseHandle=true` で先に解放の処理が登録されていても読める（Addressables 2.9.1 の `AsyncOperationBase.Complete`）。`await` の後（継続の中）では、解放が終わっている場合があり読めない
-- Service は `Completed` から `TaskCompletionSource` を作り、**シンボルに関係なく `Task` を返す**（共有タスクは常に `Task`。7.3）。`AsyncCompat.ToTask` は UniTask 版では定義されないため使わない
+- Service は `Completed` で結果を読み、Controller へ渡す。戻り値の形（共有完了を返すか、UniTask / Awaitable を返すか）は実装時に決める。`Task` は使わない（7.3）
 - 呼んだ時点で操作が完了済み（`IsDone`）なら、`Completed` を待たずにその場で結果を読む（初期化済みの場合。10.1）
 
 ### 7.6 進捗（`Tick`）
@@ -345,14 +353,14 @@ internal interface IInitializationGate
 - Manager は `LateUpdate` から `OnLateUpdate`（`Time.unscaledDeltaTime`）を中継しており、InitializeController の `Tick(deltaTime)` もこれに購読する（`Awake` で `+=`、`OnDestroy` で `-=`。必ず対で書く）
 - `Tick` は `Running` のときだけ働き、それ以外は先頭で戻る（初期化後は実質何も走らない）。Service から handle の `PercentComplete` を読み、待っている呼び出し元の `IProgress<float>` に通知する
 - 進捗の通知先は、待機を始めた呼び出し元ごとに `InitializeStateModel` に登録し、待機が終わったら（完了・キャンセルとも）外す
-- 通知先は利用者のコードのため、`Report` が例外を投げても `InitializeStateModel.ReportProgress` が受け止めて `AddressableLogger.LogException` に流し、残りの通知先への通知を続ける（7.7 のイベントの購読側と同じ理由。完了時の 1 は共有タスクの完了より前に通知するため、ここで例外が出ると待機中の呼び出し元と `WaitForInitialize` の Load が終わらなくなる。`Tick` で例外が出ると、同じ `OnLateUpdate` の後ろの購読先〔`LoadingController.Tick`〕も止まる）
+- 通知先は利用者のコードのため、`Report` が例外を投げても `InitializeStateModel.ReportProgress` が受け止めて `AddressableLogger.LogException` に流し、残りの通知先への通知を続ける（7.7 のイベントの購読側と同じ理由。完了時の 1 は共有完了へ結果を渡すより前に通知するため、ここで例外が出ると待機中の呼び出し元と `WaitForInitialize` の Load が終わらなくなる。`Tick` で例外が出ると、同じ `OnLateUpdate` の後ろの購読先〔`LoadingController.Tick`〕も止まる）
 - 通知先は、**初期化を始める前に登録する**。Addressables が初期化済みだと開始と同時に完了し、完了時の 1 を通知するため、登録が後だと 1 を取りこぼす
 
 ### 7.7 イベントの発火
 
 - InitializeController は `internal event OnSucceeded` / `OnFailed` を持ち、成功・失敗の遷移の直後に1回だけ発火する。Handler の公開イベント `OnInitialized` / `OnInitializeFailed` は、**フィールドを持たず、`add` / `remove` アクセサで Controller のイベントへ直接つなぐ**（`add => _controller.OnSucceeded += value;`、`remove => _controller.OnSucceeded -= value;`）。Manager は購読も中継もしない。Handler に購読の状態を作らないため、解除し忘れる経路は利用者の購読と解除の対だけになる
 - 公開イベントを Controller に持たせないのは、利用者が触れる窓口を外部依存型（`IAddressableHandler`）に限るため（conventions 7章）
-- 購読側（利用者のハンドラ）が投げた例外は、Controller の発火箇所で `try/catch` して `AddressableLogger.LogException` に流す。発火は Service の完了通知の中で同期的に行われるため、例外をそのまま流すと状態遷移と共有タスクの完了が止まり、待っている呼び出し元が終わらなくなるため。Handler を介さない EditMode テストでも保証できるよう、Controller 側に置く
+- 購読側（利用者のハンドラ）が投げた例外は、Controller の発火箇所で `try/catch` して `AddressableLogger.LogException` に流す。発火は Service の完了通知の中で同期的に行われるため、例外をそのまま流すと状態遷移と共有完了への結果の受け渡しが止まり、待っている呼び出し元が終わらなくなるため。Handler を介さない EditMode テストでも保証できるよう、Controller 側に置く
 
 ---
 
@@ -369,7 +377,7 @@ internal interface IInitializationGate
 | リトライ・タイムアウト・失敗後のやり直しを持たない（`Failed` は終端） | Addressables 2.9.1 は、失敗した初期化をアプリの再起動までやり直せない（10.1。呼び直すと同じ失敗の操作が返るか、同期で例外になる）。実行中に呼び直しても同じ操作が返るため、タイムアウト後の再試行も前回と同じ操作を待つだけになる。また、リモートの `.hash` は取れなければローカル・キャッシュのカタログで続行するため、初期化の失敗はネットワークではなくビルドの不備（`settings.json`・ローカルカタログが読めない）で起き、再試行しても直らない。効かない設定を置くと「効くように見えて効かない」状態になるため持たない。カタログ取得のタイムアウトは Addressables の `CatalogRequestsTimeout`、ネットワークの再試行は Download で扱う |
 | 初期化に失敗した後は、設定に関係なく Load を止める | 失敗の後は Addressables 全体が使えず、読み込みを試させても原因の分からないエラー（キーが無効）になるだけ。`LoadByLabelAsync` は空のまとめチケットになり、失敗に気づけない恐れもある。ゲートで止めて、初期化の失敗をそのまま伝える（5章） |
 | 初期化に失敗した後の Load からは初期化をやり直さない | Load は1件のアセットの読み込みであり、モジュール全体の初期化の判断をそこでさせない。そもそも Addressables 側でやり直せない（10.1） |
-| 状態を `InitializeStateModel` に分ける | 状態データ（状態・失敗の例外・共有タスク・進捗の通知先）を Controller の処理と分け、終端の制約を Model の遷移メソッドで守るため。Loading の Registry 群と同じく Manager から注入し、Model を複数の Controller から参照する形にも配線し直さずに広げられる |
+| 状態を `InitializeStateModel` に分ける | 状態データ（状態・失敗の例外・共有完了・進捗の通知先）を Controller の処理と分け、終端の制約を Model の遷移メソッドで守るため。Loading の Registry 群と同じく Manager から注入し、Model を複数の Controller から参照する形にも配線し直さずに広げられる |
 | Service を挟む | `Addressables.InitializeAsync` を直接呼ぶと、EditMode テストで失敗・同期の例外・進捗を再現できない（Loading の `IAssetLoaderServiceFactory` と同じ理由） |
 | URL キャッシュ対策は既定で OFF | リモートカタログを使わないプロジェクトや、CDN 側でキャッシュを制御しているプロジェクトでは不要。全ロケーションの解決に変換関数が挟まるため、必要なときだけ有効にする |
 | URL キャッシュ対策は既存の変換関数を上書きしない | `InternalIdTransformFunc` は1つしか持てず、上書きすると利用者の URL 差し替え等が黙って無効になる |
@@ -413,7 +421,7 @@ InitializeController に処理を足さず、**Manager 側で順序を組む**�
 
 - InitializeController・Model・Service はピュア C# に保つ（`MonoBehaviour` を継承しない。Unity のライフサイクルは Manager から中継する）
 - `InitializeStateModel` は Controller の中で `new` しない（Manager から注入する）。`Failed` の後に `Addressables.InitializeAsync` を呼ぶ経路を作らない（2.3）
-- 非同期は UniTask が正で、UniTask が無い場合だけ Task を使う。違いは、公開 API のシグネチャの `#if ADDRESSABLE_UNITASK_SUPPORT` と `AsyncCompat` に閉じ込め、UniTask を `#if` の外で `using` しない。共有タスク（7.3）と `IAddressablesInitializeService`・`IInitializationGate` の戻り値は、UniTask 導入時も `Task` のままにする（設計仕様書 3.5.1）
+- 非同期は UniTask が正で、UniTask が無い場合だけ Awaitable を使う。`Task` は使わない。違いは、シグネチャの `#if ADDRESSABLE_UNITASK_SUPPORT` と `AsyncCompat` に閉じ込め、UniTask を `#if` の外で `using` しない。複数の待ち手は共有完了（7.3）で扱う（設計仕様書 3.5.1）
 - 時間待ちを足すときは `AsyncCompat.Delay` を使う（`UniTask.Delay` を直接呼ぶと、ポーズ中〔`timeScale = 0`〕に待機が終わらない）
 - `Core/Initialize/` から `Core/Loading/`（`Core/Download/`）を `using` しない。共有が必要なものは `Core/` 直下に置く
 - イベントの購読（`OnLateUpdate`・`OnInitialized` 等）と `InternalIdTransformFunc` の設定は、`Awake`／`OnDestroy` で必ず対にする
@@ -437,7 +445,7 @@ PlayMode での確認は `Tests/Runtime/AddressablesInitializeBehaviorTests.cs`�
 | 確認する点 | 結果 | 本機能への影響 |
 |---|---|---|
 | 失敗した後に `Addressables.InitializeAsync` を再び呼ぶと、初期化をやり直すか（前回の失敗した操作が返らないか） | **やり直さない**（2026-10-02 PlayMode で確認。P1・P2・P5）。handle を保持している間は、同じ失敗済みの操作が返る。handle が解放された後（自動解放・自分で解放のどちらも）は、呼んだその場で `ArgumentOutOfRangeException` が出る。初期化を始めた印（`hasStartedInitialization`。internal）が戻らず、失敗時に空になったロケーター一覧の先頭を読むため。失敗の後は Load も失敗する。この状態から戻すには、アプリの再起動が必要（Editor では Play のたびに作り直されるため、再起動したのと同じになる） | リトライ・失敗後のやり直しは効かないため持たず、`Failed` を終端にした（2.3・8章）。失敗の後は Load をゲートで止める（5章）。`Failed` の後に `Addressables.InitializeAsync` を呼ばない |
-| 実行中に `Addressables.InitializeAsync` を再び呼ぶと、同じ操作が返るか（タイムアウト後の再試行に関係する） | **同じ操作が返る**（2026-10-02 PlayMode で確認。P3） | タイムアウト後の再試行は前回と同じ操作を待つだけになるため、タイムアウトを持たない（8章）。共有タスクの仕組み（7.3）と食い違わない |
+| 実行中に `Addressables.InitializeAsync` を再び呼ぶと、同じ操作が返るか（タイムアウト後の再試行に関係する） | **同じ操作が返る**（2026-10-02 PlayMode で確認。P3） | タイムアウト後の再試行は前回と同じ操作を待つだけになるため、タイムアウトを持たない（8章）。共有完了の仕組み（7.3）と食い違わない |
 | 初期化済みのときに `Addressables.InitializeAsync` を呼ぶと、同期的に完了するか | **同期で完了する**（2026-10-02 PlayMode で確認。P4）。呼んだ直後に、成功で完了済みの操作が返る。なお、存在しないローカルのパスによる失敗も、呼んだその場で完了する | 自動モードでも `Awake` の中で `Succeeded` になり、イベントが購読前に発火する。4.1 の「購読時に `AccIsInitialized` を確認する」は必須 |
 | `InternalIdTransformFunc` にリモートカタログの `.hash` の InternalId が渡るか（Addressables 2.9.1） | ソース上は渡る（`TextDataProvider` → `ResourceManager.TransformInternalId`）。本体（`.bin`）の URL は変換後の `.hash` の URL から作られる（`ContentCatalogProvider`）。実機では未確認 | 渡らない場合、6章の対策は効かない |
 
@@ -447,7 +455,7 @@ PlayMode での確認は `Tests/Runtime/AddressablesInitializeBehaviorTests.cs`�
 
 | 種類 | 場所 | 確認すること |
 |---|---|---|
-| EditMode | `Tests/Editor/` | 偽の `IAddressablesInitializeService` で InitializeController を動かす：共有タスク（2回呼んでも初期化は1回）、呼び出し元のキャンセルが他に影響しないこと、失敗が `await` と `OnInitializeFailed` の両方に届くこと、`Failed` の後の `InitializeAsync` が Service を呼ばずに同じ例外を返すこと、Service の同期の例外が `Failed` になること、`autoReleaseHandle=false` での `Dispose` 時の解放、進捗の通知 |
+| EditMode | `Tests/Editor/` | 偽の `IAddressablesInitializeService` で InitializeController を動かす：共有完了（2回呼んでも初期化は1回）、呼び出し元のキャンセルが他に影響しないこと、失敗が `await` と `OnInitializeFailed` の両方に届くこと、`Failed` の後の `InitializeAsync` が Service を呼ばずに同じ例外を返すこと、Service の同期の例外が `Failed` になること、`autoReleaseHandle=false` での `Dispose` 時の解放、進捗の通知 |
 | EditMode | `Tests/Editor/` | `InitializeStateModel`：遷移（`NotStarted → Running → Succeeded / Failed`）と、条件に合わない遷移で状態が変わらないこと（`Succeeded` / `Failed` は終端）、進捗の通知先の登録・解除 |
 | EditMode | `Tests/Editor/` | `CatalogCacheBustingService`：`.hash` 以外（`.bin` / `.json` を含む。クエリの中だけに `.hash` がある URL も）と `http` 以外は変換しないこと・呼ぶたびに連番が進むこと・クエリ付きの `.hash`（署名トークン等）に `&` で続くこと・既存の関数との連結・復元（自分の関数のままなら戻す／利用者が上書きしていたら戻さない） |
 | EditMode | `Tests/Editor/` | `IInitializationGate`：7.4 の表の各マス（InitializeController 側）。5章の表の各マス（偽のゲートで LoadingController を動かし、待機中のキャンセル・破棄・寿命の終了で何も残らないこと。破棄は `ObjectDisposedException`、寿命の終了は `OperationCanceledException` になること。`PassThrough` でも `Failed` の後は `LoadAsync` / `LoadByLabelAsync` が `AddressableInitializeException` になり、何も残らないこと） |

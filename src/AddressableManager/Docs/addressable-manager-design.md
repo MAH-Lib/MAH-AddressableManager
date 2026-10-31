@@ -16,7 +16,7 @@ Addressables の読み込み(Load)〜解放(Release)を一括管理する `Addre
 - 多重ロード・解放漏れなどの事故が構造的に起きにくいこと
 - 神クラス（グローバル Singleton が全 handle を抱え込む）化を避けること
 - SO(ScriptableObject) 設定のみで実装者が即座に扱えるレベルまで抽象化すること
-- **汎用モジュール**として、DIコンテナ（VContainer等）・R3のような特定ライブラリに依存しない設計とすること（DIコンテナ導入時もManager内部実装は変更しない）。非同期処理は UniTask を正とするが、必須の依存にはせず、UniTask が無いプロジェクトでは `Task` で動作させる（3.5.1）
+- **汎用モジュール**として、DIコンテナ（VContainer等）・R3のような特定ライブラリに依存しない設計とすること（DIコンテナ導入時もManager内部実装は変更しない）。非同期処理は UniTask を正とするが、必須の依存にはせず、UniTask が無いプロジェクトでは `Awaitable` で動作させる（3.5.1）
 
 ---
 
@@ -105,14 +105,14 @@ AddressableManager（機能内クラスの生成・寿命管理と、Handler を
 - 失敗時のリトライ（段階ごと）
 - 起動時もゲーム内も、`IAddressableHandler`（3.7）経由で任意のタイミングから呼び出される。**Manager が起動時に自動で呼ぶ「起動シーケンス」は持たない**（容量の確認ダイアログを挟めなくなるため。必要になったら SO の設定として追加する）
 
-**ダウンロードの操作は、別の Handler を作らず `IAddressableHandler` にメソッドとして追加する**（利用者が触れる入口を1つに絞るため。Manager に `AccDownloadHandler` は置かない）。確定した API は次のとおり（非同期型 Task/UniTask の切り替え方針は3.5.1参照。詳細は `src/AddressableManager/Docs/specs/download-spec.md` 4章）。
+**ダウンロードの操作は、別の Handler を作らず `IAddressableHandler` にメソッドとして追加する**（利用者が触れる入口を1つに絞るため。Manager に `AccDownloadHandler` は置かない）。確定した API は次のとおり（非同期型 UniTask/Awaitable の切り替え方針は3.5.1参照。詳細は `src/AddressableManager/Docs/specs/download-spec.md` 4章）。
 
 ```csharp
-// IAddressableHandler に追加するメンバー（UniTask 導入時は UniTask 版、無ければ Task 版）。対象は Label 単位
+// IAddressableHandler に追加するメンバー（UniTask 導入時は UniTask 版、無ければ Awaitable 版。ここでは UniTask 版を示す）。対象は Label 単位
 DownloadStatus AccDownloadStatus { get; }   // 取得した時点の状態のコピー。必要なたびに取得し直す
-Task<bool> HasUpdateAsync(CancellationToken ct = default);   // 更新データの有無だけを返す。カタログは更新しない
-Task<DownloadCheckResult> CheckUpdateAsync(CancellationToken ct = default);  // カタログの確認・更新、件数（カタログ数・バンドル数）と容量
-Task DownloadAsync(IProgress<DownloadStatus> progress = null, CancellationToken ct = default);
+UniTask<bool> HasUpdateAsync(CancellationToken ct = default);   // 更新データの有無だけを返す。カタログは更新しない
+UniTask<DownloadCheckResult> CheckUpdateAsync(CancellationToken ct = default);  // カタログの確認・更新、件数（カタログ数・バンドル数）と容量
+UniTask DownloadAsync(IProgress<DownloadStatus> progress = null, CancellationToken ct = default);
 // 上の3つには、Label を引数で渡して SO の設定を上書きする版（IReadOnlyList<string> labels を先頭に取る）もある
 ```
 
@@ -194,37 +194,55 @@ public enum CatalogUpdatePolicy
 
 詳細（改修内容の一覧・インターフェース定義）は **`src/AddressableManager/Docs/specs/loading-spec.md` 6章**を参照。
 
-### 3.5.1 非同期実装方針（UniTask を正とし、無ければ Task）
+### 3.5.1 非同期実装方針（UniTask を正とし、無ければ Awaitable）
 
-非同期処理は **UniTask を正**とする。Unity のライフサイクル（PlayerLoop）に組み込まれ、`Task` より GC アロケーションが発生しにくいため。本モジュールの利用者は UniTask を導入している前提であり、UniTask 版が本来の動作である。
+> **移行前の注意**：本節は 2026-10-31 に決めた方針である。コードの移行が済むまで、実装には `Task` が残っている（5.4）。
 
-ただし汎用モジュールとして UniTask を**必須の依存にはしない**。UniTask が導入されていないプロジェクトでも動くよう、その場合に限り `Task` で動作させる。DIコンテナ（VContainer等）・R3 には依存しない。DIコンテナを導入するプロジェクトであっても、Manager内部の実装（Controller以下）は変更しない。
+非同期処理は **UniTask を正**とする。Unity のライフサイクル（PlayerLoop）に組み込まれ、GC アロケーションが発生しにくいため。本モジュールの利用者は UniTask を導入している前提であり、UniTask 版が本来の動作である。
+
+ただし汎用モジュールとして UniTask を**必須の依存にはしない**。UniTask が導入されていないプロジェクトでも動くよう、その場合に限り **`UnityEngine.Awaitable`**（Unity 6.0 以上）で動作させる。**`System.Threading.Tasks.Task` は使わない**。DIコンテナ（VContainer等）・R3 には依存しない。DIコンテナを導入するプロジェクトであっても、Manager内部の実装（Controller以下）は変更しない。
 
 - **正（UniTask 導入時）**：コンパイルシンボル `ADDRESSABLE_UNITASK_SUPPORT` が定義され、`Cysharp.Threading.Tasks.UniTask` / `UniTask<T>` を使用する
-- **UniTask が無い場合の代替**：`System.Threading.Tasks.Task` / `Task<T>`（.NET標準）を使用する
-- 切り替えは `#if` によるAPIシグネチャの出し分けで行う。`#if ADDRESSABLE_UNITASK_SUPPORT` 側に UniTask 版を、`#else` 側に Task 版を書く。呼び出し側は `await` で使う限り、どちらの型が使われているか意識する必要はない
+- **UniTask が無い場合の代替**：`UnityEngine.Awaitable` / `Awaitable<T>` を使用する
+- 切り替えは `#if` によるAPIシグネチャの出し分けで行う。`#if ADDRESSABLE_UNITASK_SUPPORT` 側に UniTask 版を、`#else` 側に Awaitable 版を書く。呼び出し側は `await` で使う限り、どちらの型が使われているか意識する必要はない
 
-#### 例外：複数の呼び出し元が待つ共有タスクは、UniTask 導入時も Task にする
+#### Task を使わない理由
 
-**安全性を優先し**、次の共有タスクと、それを扱うヘルパーは、シンボルに関係なく常に `Task` で持つ。
+- UniTask と Awaitable は、**どちらも1つのインスタンスを1回しか `await` できない**。同じ規則にそろえることで、切り替え後の挙動の差を小さくする
+- WebGL はスレッドプールが動かないため、スレッドに依存する `Task` の機能（`Task.Delay`、`TaskScheduler.Default` を使う `ContinueWith` など）を持ち込まない。WebGL は設計上の対象に含めるが、**WebGL ビルドでの動作は検証していない**
+- UniTask が無い環境では、呼び出しごとの経路（公開 API・Controller・Service・Worker）の GC アロケーションを減らせる。ただし共有完了（下記）は自身も確保するため、GC 削減は共有部分を置き換える理由にはならない
 
-| 共有タスク | 誰が待つか |
+**失うもの**：`Task` の「何度でも安全に `await` できる」性質と、未観測の例外の検出（`TaskScheduler.UnobservedTaskException`）。自作の `SharedCompletion` を保守する負担も増える。
+
+#### 複数の呼び出し元が待つ処理は、await できる値を共有しない
+
+UniTask と Awaitable は1回しか `await` できず、2回目は例外になるか、プールで再利用された別の処理の状態を読む恐れがある。そのため、次の処理は `await` できる値ではなく、**共有完了（`SharedCompletion`）** を共有する。
+
+| 共有完了 | 誰が待つか |
 |---|---|
-| ロード1件分の LoadTask（`AssetEntryModel.AccLoadTask`） | 重複ロードの呼び出し元すべて、Label 一括ロード、Worker の後始末。Entry の存続中は、完了した後にも後から来た Load が待つ |
-| 初期化1回分のタスク（`InitializeStateModel` が持つ共有タスク、`IAddressablesInitializeService`、`IInitializationGate`） | `InitializeAsync` の呼び出し元すべて、初期化を待つ Load |
-| 上を扱うヘルパー（`AsyncCompat` の Task 版 `WithCancellation`・`WaitAllOrFirstFault`） | ― |
+| ロード1件分（`AssetEntryModel.AccLoadTask`） | 重複ロードの呼び出し元すべて、Label 一括ロード、Worker の後始末。Entry の存続中は、完了した後にも後から来た Load が待つ |
+| 初期化1回分（`InitializeStateModel` が持つ共有完了、`IAddressablesInitializeService`、`IInitializationGate`） | `InitializeAsync` の呼び出し元すべて、初期化を待つ Load、Download |
 
-理由：
-- `Task` は、何人が同時に待っても、完了した後に何度待っても安全である
-- `async UniTask` の戻り値は1回しか `await` できない。完了後は内部のオブジェクトがプールに戻って再利用されるため、2回目の `await` は例外になるか、別の処理の状態を読む恐れがある
-- `.Preserve()` や `UniTaskCompletionSource` を使えば UniTask でも複数回待てるが、付け忘れてもコンパイルは通り、症状は重複ロードのタイミングなどでしか出ない。不具合の入り口を作らないことを優先する
-- 失うものは小さい。共有タスクの確保はロード1件・初期化1回につき1回で、Addressables のロード自体の確保に比べて小さい。呼ばれる回数の多い入口（公開 API の戻り値・Worker のロード）は UniTask にしているため、GC 削減の効果は保たれる
+共有完了の考え方は次のとおり。
 
-公開 API（`LoadAsync` / `LoadByLabelAsync` / `InitializeAsync`）は、共有タスクを `await` したうえで UniTask を返す。呼び出し元から見える型は UniTask のままである。
+- 状態（待機中・成功・失敗・キャンセル）と例外を持つ
+- 待ち手ごとに専用の CompletionSource（`UniTaskCompletionSource` / `AwaitableCompletionSource`）を作って登録し、完了時に全待ち手へ結果を配る
+- 完了済みなら、待たずに結果を返す
+- 待ち手のキャンセルは、その待ち手の登録を外すだけで、他の待ち手と実処理には影響しない
+- 複数の完了の待ち合わせ（最初の失敗で打ち切る一括待機）は、完了通知のコールバックで作る
+
+公開 API（`LoadAsync` / `LoadByLabelAsync` / `InitializeAsync`）は、共有完了を待ったうえで UniTask / Awaitable を返す。
+
+**実装時に決めること**：`SharedCompletion` の名前（暫定）・配置・API、待ち手の CompletionSource の再利用の要否、`AsyncCompat` の Awaitable 版の実装、`AccLoadTask` などの識別子の改名、EditMode テストでの Awaitable の扱い（完了にプレイヤーループを使うため）。
+
+#### Awaitable の制約
+
+- メインスレッド専用。完了通知もメインスレッドから行う
+- `await` されなかった例外は握りつぶされる。fire-and-forget にする箇所は、例外を観測する経路（ログ出力）を必ず用意する
 
 #### 時間待ちは実時間で待つ
 
-`UniTask.Delay` は既定で `Time.timeScale` の影響を受け、ポーズ中（`timeScale = 0`）は待機が終わらない。ポーズ中に失敗したロードのリトライが止まらないよう、時間待ちは `AsyncCompat.Delay` に集約し、UniTask 版では `ignoreTimeScale: true` を指定する（Task 版の `Task.Delay` は元から実時間）。ポーリングがポーズ中も進む `unscaledDeltaTime` を使うのと同じ考え方である（3.8）。
+`UniTask.Delay` は既定で `Time.timeScale` の影響を受け、ポーズ中（`timeScale = 0`）は待機が終わらない。ポーズ中に失敗したロードのリトライが止まらないよう、時間待ちは `AsyncCompat.Delay` に集約し、UniTask 版では `ignoreTimeScale: true` を指定する。Awaitable 版も実時間で待つよう実装する（`Awaitable.WaitForSecondsAsync` は `timeScale` の影響を受けるため使わない）。ポーリングがポーズ中も進む `unscaledDeltaTime` を使うのと同じ考え方である（3.8）。
 
 #### シンボルの自動設定
 
@@ -238,13 +256,13 @@ public enum CatalogUpdatePolicy
 
 下限を 2.5.0 とする根拠：2.5.0 で `cancelImmediately` フラグや `Awaitable.AsUniTask()` が追加されており、API の区切りとして妥当。執筆時点の最新は 2.5.11。上限は設けず、以降のバージョンすべてを対象とする。
 
-**制約に注意**：Version Defines は **UPM（Package Manager）経由でインストールされたパッケージにのみ反応する**。UniTask を `.unitypackage` で導入して `Assets/` 配下に展開した場合、パッケージとして認識されないためシンボルが定義されず、UniTask が存在するのに代替の Task 版が使われる。UniTask 版が正であるため、UPM（git URL指定を含む）で導入する運用に統一する。
+**制約に注意**：Version Defines は **UPM（Package Manager）経由でインストールされたパッケージにのみ反応する**。UniTask を `.unitypackage` で導入して `Assets/` 配下に展開した場合、パッケージとして認識されないためシンボルが定義されず、UniTask が存在するのに代替の Awaitable 版が使われる。UniTask 版が正であるため、UPM（git URL指定を含む）で導入する運用に統一する。
 
 キャンセル付き待機のヘルパー（`AsyncCompat`）と `AsyncOperationHandle` からのブリッジの実装は **`src/AddressableManager/Docs/specs/loading-spec.md` 6.2章**を参照。
 
 本方針は Manager 全層（Controller / Service / Handler）に適用する。移植元の `AddressableLoaderBase<T>`（UniTask 直接依存）も改修対象に含め、上記の `#if` 切り替えに合わせる（3.5参照）。
 
-検証用サンドボックス（`src/AddressableManager/`）には UniTask を導入しているため、テストは UniTask 版で実行される。代替の Task 版を確かめる場合は、UniTask を外した状態でテストを実行する。
+検証用サンドボックス（`src/AddressableManager/`）には UniTask を導入しているため、テストは UniTask 版で実行される。代替の Awaitable 版を確かめる場合は、UniTask を外した状態でテストを実行する。
 
 ### 3.6 Model
 
@@ -252,8 +270,8 @@ public enum CatalogUpdatePolicy
 - **`AssetEntryKey`**：Registry の判定キー。`(AssetKey, 型)` の組で、同じ `AssetKey` でも型が違えば別のエントリになる（3.4.2）
 - **`AssetTicket<T>`**：Load1回ごとに発行される解放用チケット。読み込んだアセットを持ち、通し番号で一意になる
 - **`AssetGroupTicket`**：Label 一括ロード1回ごとに発行される、まとめチケット。中身のアセットを型ごとに取り出せ、`Release` 1回でまとめて解放される（3.4.2）
-- **AssetEntryModel / AssetRegistryModel**：1件分の状態（Worker, LoadTask, RefCount, CountByScope, AssetType）と、その集合
-- **InitializeStateModel**：初期化の状態・失敗の例外・共有タスク・進捗の通知先。Manager が生成して InitializeController に注入する。`Succeeded` / `Failed` を終端とする遷移を自身で守る（詳細：`src/AddressableManager/Docs/specs/initialize-spec.md` 7.2）
+- **AssetEntryModel / AssetRegistryModel**：1件分の状態（Worker, ロードの共有完了, RefCount, CountByScope, AssetType）と、その集合
+- **InitializeStateModel**：初期化の状態・失敗の例外・共有完了・進捗の通知先。Manager が生成して InitializeController に注入する。`Succeeded` / `Failed` を終端とする遷移を自身で守る（詳細：`src/AddressableManager/Docs/specs/initialize-spec.md` 7.2）
 
 詳細（フィールド定義・サンプルコード）は **`src/AddressableManager/Docs/specs/loading-spec.md` 7章**を参照。
 
@@ -534,7 +552,7 @@ namespace MAH.AddressableManager.Editor.Registration { internal sealed class Add
 - 破棄検知インターフェースの外部公開（実装漏れが `Release` 忘れと同じ失敗モードになり、安全網として機能しないため不採用）
 - ピュアC#クラスのowner指定（GC依存で回収タイミングが不定のため不採用。Scene寿命またはIDisposableで代替）
 - Manager内部実装をUniTask/DIコンテナ/R3等の特定ライブラリに直接依存させる設計（汎用モジュールとする方針のため不採用。UniTask は正として使うが、`#if` で出し分け、必須の依存にはしない。3.5.1参照）
-- 複数の呼び出し元が待つ共有タスク（LoadTask・初期化のタスク）を UniTask（`.Preserve()` / `UniTaskCompletionSource`）にすること（2回目の `await` の誤りがコンパイルで検出できず、GC 削減の効果も小さいため、安全性を優先して `Task` のままにする〔2026-10-05〕。3.5.1参照）
+- 1つの `await` できる値を複数の待ち手で共有すること（`.Preserve()` を含む）。2回目の `await` の誤りがコンパイルで検出できず、症状は重複ロードのタイミングなどでしか出ないため、待ち手ごとに値を作る共有完了（`SharedCompletion`）にする（2026-10-31 に、2026-10-05 の「共有は `Task` のままにする」を置き換えた。3.5.1・5.4参照）
 - PlayerLoopへのシステム直接挿入（Controller側の実装は変わらず、実行順の確定性という利点が本モジュールの要件では効かないため不採用。`src/AddressableManager/Docs/specs/loading-spec.md` 9章参照）
 - `InstantiateAsync` / `ReleaseInstance` 相当のAPI提供（戻り値のルールを一貫させるため不採用。Load系とInstantiate系という性質の異なる2系統を抱え込まない。3.4.1参照）
 - EditorWindowからの手動Release／強制回収ボタン（Editorは読み取り専用とする原則を崩すため不採用。3.9参照）
@@ -586,7 +604,7 @@ Unityではフレーム時間よりGCによるスパイクが体感品質に影�
 - **クロージャ・ラムダの毎回生成を避ける**：Watcher へ渡すコールバックは使い回すか、フィールドにキャッシュした delegate を渡す
 - **`foreach` による Dictionary 列挙**：`Dictionary` の enumerator は構造体のためボックス化しないが、`IEnumerable` にアップキャストすると発生する。列挙時は具体型のまま扱う
 - **Label ロードの確保**：ロケーションのバッファは、`await` をまたいで並行に使われるため、`ReleaseLifetime` の使い回しバッファとは違い呼び出しごとに確保する（フィールドで使い回すと中身が混ざる）。まとめチケットの `GetAssets<T>()` は型ごとの結果をキャッシュして確保を避ける。`IReadOnlyList<T>` の `foreach` は列挙子がボックス化されるため、`for` で回す
-- **非同期処理のアロケーション**：`Task<T>` は参照型のためLoad呼び出しごとにヒープ確保が発生する。シーン開始時に数百件を一括ロードする場面ではアロケーションが積むため、UniTask を正とする（3.5.1）。ただし複数の呼び出し元が待つ共有タスクは、安全性を優先して `Task` のまま持つ（確保はロード1件・初期化1回につき1回）
+- **非同期処理のアロケーション**：`Task<T>` は参照型のためLoad呼び出しごとにヒープ確保が発生する。シーン開始時に数百件を一括ロードする場面ではアロケーションが積むため、UniTask を正とし、無い場合は Awaitable を使う（3.5.1）。複数の呼び出し元が待つ共有完了は、ロード1件・初期化1回につき1回の確保に加え、待ち手ごとに確保する（再利用の要否は実装時に決める）
 
 #### エディタ専用処理の除外
 
@@ -649,6 +667,7 @@ Unityではフレーム時間よりGCによるスパイクが体感品質に影�
 
 - （2026-10-24）**アセットの登録を実装し、手動一括登録の画面を作り直した**。(1) 手動一括登録は、設定を先に決めて読み込む形をやめ、**先に対象の配下をすべて読み込んで一覧に出し、拡張子のオン／オフと行のチェックで絞り込む**形にした（設定箇所が多く手間がかかったため）。画面で決めるのは「追加先のグループ」と「Label」だけで、アドレスのテンプレート・除外パターン・新規グループの Template は、画面に出さず Editor SO の値を使う。(2) 一覧には**登録済みのアセットを出さない**（出さなかった件数だけ知らせる）。(3) Editor SO に、手動一括登録だけで使う「**既定の追加先グループ**」を足した（ルールの SO は、これまでどおり空なら `DefaultGroup`）。(4) ルールの SO の Create メニューは `CreateAssetMenu` をやめ、独自の `MenuItem` で作る（作成時に確実に初期値をコピーするため）。(5) グループ名を直接書く項目から「Template」の語を外し、「追加先のグループ」（`_targetGroup`）とした（Group Template の SO と紛らわしいため）。(6) 右クリックのメニューは `MAH → Register to Addressables...` の1階層にし、並び順の数字を離して他のパッケージのコマンドと区切る。(7) Addressables の `IsPathValidForEntry` は `internal` で呼べないため、同じ条件を自前で持った。**失うもの**：手動一括登録の画面で、アドレスのテンプレートと除外パターンを変えられない／登録済みのアセットのグループの移動ができない。画面の文言は日本語で、日本語と英語の切り替えは別の作業で実装する予定（詳細：`src/AddressableManager/Docs/specs/asset-registration-spec.md` 5・10・11.2章）
 - （2026-10-24）**Editor 機能8「表示言語の切り替え」を実装した**（詳細は [`specs/editor-localization-spec.md`](specs/editor-localization-spec.md)）。公開パッケージで海外の利用者も使うため、Editor ツールの文言を日本語と英語で切り替えられるようにし、他言語は**利用者が JSON ファイルで足せる**形にした。(1) 言語は列挙型ではなく言語コードの文字列で持つ（利用者が足した言語を、コードの変更なしで扱うため）。(2) 翻訳データは JSON（同梱の ja / en は `Editor/Localization/`、利用者の追加分は `Assets/` 配下の `MAH.AddressableManager.Editor.<言語コード>.json`。同じ言語コードならキー単位で上書きし、足りないキーは英語にフォールバックする）。(3) 言語の設定は EditorPrefs（個人ごと。Editor SO には入れない）。(4) 対象は Editor ウィンドウ・Inspector・ダイアログ・Editor 側のログ・出力ファイルで、**Runtime のログ・例外は翻訳しない**（Runtime に仕組みを入れるとビルドにも載るため）。(5) `[Header]` / `[Tooltip]` は `PropertyField` が必ず描画してしまうため、Editor SO・ルールの SO・Runtime の設定 SO（とその設定クラス）から**外し**、文言は言語ファイルのキーで持つ（Runtime の属性を外しても、ビルドの挙動・内容は変わらず、むしろ日本語の文字列が Runtime から消える）。(6) 失敗メッセージの区切り「：」は、全角に固定せず `: ` にした。
+- （2026-10-31）**非同期処理の代替を `Task` から `Awaitable` に改め、`Task` を完全に廃止することにした**（ドキュメントのみ先行して更新した。コードの移行はこれから行う）。UniTask と Awaitable はどちらも1回しか `await` できないため、規則をそろえて切り替え後の挙動を安定させること、WebGL にスレッド依存の `Task` の機能を持ち込まないことが理由。これに伴い、2026-10-05 に決めた「共有タスクは `Task` のままにする」を取り下げ、複数の待ち手は共有完了（`SharedCompletion`。名前は暫定）で扱う。5.3 の却下項目も、「1つの `await` できる値を複数の待ち手で共有すること」に置き換えた。代替案のうち、待ち手のポーリングは再開が最大1フレーム遅れ、EditMode テストの構造も崩れやすいため、共有部分だけ `Task` を残す案は `Task` の廃止という目的に反するため採らなかった。UniTask が無い環境では公開 API の戻り値の型が変わるため、**破壊的変更**である。**失うもの**：`Task` の複数回 `await` の安全性、未観測の例外の検出。`SharedCompletion` の保守が増える。WebGL ビルドでの動作は検証していない（3.5.1）
 
 ## 7. 未確定・今後の検討事項
 

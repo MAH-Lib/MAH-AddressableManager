@@ -1,10 +1,11 @@
 # Usage (API Reference)
 
-> Last updated: 2026-10-24 / Unity: 6000.3.26f1
+> Last updated: 2026-10-31 / Unity: 6000.3.26f1
 
 This document explains how to use the settings asset, the public API, the Editor tools, and the samples of `AddressableManager` in your project. For installation (from the Package Manager, or by writing a pinned version in `manifest.json`) and the quickest way to get started, see the [README](../README.md#installation).
 
-- Code examples use the UniTask version. In projects without UniTask, the return type is `Task` instead of `UniTask` (the way you call it is the same)
+- Code examples use the UniTask version. In projects without UniTask, the return type is `Awaitable` instead of `UniTask` (the way you call it is the same)
+- **`await` each returned value only once.** Both `UniTask` and `Awaitable` allow a single `await`. Do not store a returned value to `await` it again later or from multiple places
 - All operations go through `IAddressableHandler` (`AddressableManager.AccInstance.AccHandler`). Add `using MAH.AddressableManager;` to use it
 - Terms (release, reclaim, lifetime, etc.) follow the [glossary](glossary.md) (Japanese; see its "英語" (English) column for the English terms)
 
@@ -564,7 +565,7 @@ Things to know:
 ## 7. Notes
 
 - **Inside a namespace under `MAH`, such as `MAH.MyGame`, `AddressableManager` is interpreted as a namespace (`MAH.AddressableManager`) rather than the class, causing a compile error**. In that case, write the fully qualified name `MAH.AddressableManager.AddressableManager.AccInstance` or use a `using` alias
-- **Install UniTask via UPM**. If you put it under `Assets/` with a `.unitypackage`, it is not recognized and the `Task` version is used
+- **Install UniTask via UPM**. If you put it under `Assets/` with a `.unitypackage`, it is not recognized and the `Awaitable` version is used
 - Once Addressables initialization fails, it cannot be retried until the app restarts. Treat an initialization failure as an error that prompts a restart
 
 ---

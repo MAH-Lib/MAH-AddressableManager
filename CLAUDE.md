@@ -6,7 +6,7 @@
 >
 > **本書内のパスはすべてリポジトリルート起点**。Unity作業時のカレントディレクトリは `src/AddressableManager/` になることが多いため、パスを解決する際は起点を取り違えないこと。
 
-最終更新日：2026-10-24 ／ 対象 Unity バージョン：6000.3.26f1
+最終更新日：2026-10-31 ／ 対象 Unity バージョン：6000.3.26f1
 
 ---
 
@@ -85,11 +85,14 @@ Docs/glossary.md                                                   <!-- 用語�
 
 ### 非同期処理
 
-- **UniTask が正**（Unity のライフサイクルに組み込まれ、GC が発生しにくいため）。`Task` は UniTask が導入されていない場合の代替
-- ただし UniTask は必須の依存にしない。**`#if ADDRESSABLE_UNITASK_SUPPORT` の外で UniTask を `using` しない**。`#if` 側に UniTask 版、`#else` 側に Task 版を書く
-- ⚠️ **例外：複数の呼び出し元が待つ共有タスク（`AccLoadTask`・初期化の共有タスク・`IInitializationGate`）は、UniTask 導入時も `Task` のまま**。UniTask は2回目の `await` で例外や別処理の状態の読み取りになり得るため、安全性を優先している。UniTask 化（`.Preserve()` 等）を提案しない（仕様書3.5.1・5.3）
-- キャンセル付き待機は `AsyncCompat.WithCancellation` に集約する（Task/UniTask の差はここだけで吸収）
-- 時間待ちは `AsyncCompat.Delay` を使い、`UniTask.Delay` を直接呼ばない（既定では `timeScale = 0` の間に待機が終わらない）
+- **UniTask が正**（Unity のライフサイクルに組み込まれ、GC が発生しにくいため）。UniTask が導入されていない場合の代替は **`UnityEngine.Awaitable`**（**Unity 6.0 / 6000.0 以上**が前提。`AwaitableCompletionSource` を使うため）。**`System.Threading.Tasks.Task` は使わない**（戻り値・引数・フィールド・`TaskCompletionSource`・`Task.WhenAny` / `ContinueWith` を含む）
+- UniTask と Awaitable は**どちらも「1つのインスタンスを1回しか `await` できない」**。この共通ルールを前提に設計する。**同じインスタンスを複数箇所で `await` しない／フィールドに保持して後から `await` しない**
+- ただし UniTask は必須の依存にしない。**`#if ADDRESSABLE_UNITASK_SUPPORT` の外で UniTask を `using` しない**。`#if` 側に UniTask 版、`#else` 側に Awaitable 版を書く
+- ⚠️ **複数の呼び出し元が待つ共有（`AccLoadTask`・初期化の共有・`IInitializationGate`）は、`await` 可能な値を共有せず、共有完了オブジェクト（`SharedCompletion`）を共有する**。待ち手ごとに専用の CompletionSource（`UniTaskCompletionSource` / `AwaitableCompletionSource`）を作って登録し、完了時に全待ち手へ結果を配る。完了済みなら即完了の値を返す。複数完了の待ち合わせ（最初の失敗で打ち切る一括待機）も、完了通知のコールバックで作る。`.Preserve()` や、Awaitable を複数人で `await` する実装を提案しない
+- `Awaitable` は**メインスレッド専用**。`SetResult` 等の完了通知もメインスレッドから呼ぶ。`await` されなかった例外は握りつぶされるため、fire-and-forget にする箇所は例外を観測する経路（ログ出力）を必ず用意する
+- キャンセル付き待機は `AsyncCompat.WithCancellation`（共有完了では `SharedCompletion.Wait(ct)`）に集約する（UniTask/Awaitable の差はここだけで吸収）
+- 時間待ちは `AsyncCompat.Delay` を使い、`UniTask.Delay` を直接呼ばない（既定では `timeScale = 0` の間に待機が終わらない）。Awaitable 版は `Awaitable.WaitForSecondsAsync`（`timeScale` の影響を受ける）を使わず、実時間で待つよう実装する
+- 🚧 **移行中**：コードの一部は旧方針（`Task`）のまま残っている。移行の計画と進捗は `.steering/` の該当作業を参照。新規・変更するコードは本節の方針で書き、既存の `Task` を見つけたら移行対象として扱う（無断で広範囲に書き換えず、計画に沿って進める）
 
 ### 依存関係
 
@@ -143,6 +146,7 @@ namespace のルートは `MAH.AddressableManager`。対応関係には**2つの
 | Addressables | 2.10.3 | 本モジュールが管理対象とする実体 |
 | ScriptableBuildPipeline | 2.6.2 | Addressables の依存（自動解決） |
 | UniTask | git URL（UPM） | 非同期処理の正（必須依存にはしない）。導入時のみ Version Defines で `ADDRESSABLE_UNITASK_SUPPORT` が定義される |
+| Awaitable（`UnityEngine.Awaitable`） | Unity 本体（Unity 6.0 以上） | UniTask が無い場合の代替。パッケージ導入は不要 |
 | URP | 17.3.0 | 検証用サンドボックスのレンダリング |
 | Test Framework | 1.6.0 | EditMode / PlayMode テスト |
 
@@ -163,7 +167,7 @@ namespace のルートは `MAH.AddressableManager`。対応関係には**2つの
 
 <!-- Claudeが実際に間違えた直後に随時追記する。このセクションだけは積極的に育てる。 -->
 
-- **Version Defines は UPM 経由のパッケージにのみ反応する**。UniTask を `.unitypackage` で `Assets/` 配下に展開するとシンボルが定義されず、UniTask があるのに Task 版が使われる。UniTask は UPM（git URL 可）で導入すること
+- **Version Defines は UPM 経由のパッケージにのみ反応する**。UniTask を `.unitypackage` で `Assets/` 配下に展開するとシンボルが定義されず、UniTask があるのに Awaitable 版が使われる。UniTask は UPM（git URL 可）で導入すること
 - **`AssetKey` は「入口の種別＋値」の一致のみで同一判定する**。同一アセットを Path と AssetReference の両方で要求すると二重ロードされるが、これは**コストとの兼ね合いで許容した仕様**であってバグではない（仕様書3.6）
 - CLAUDE.md はリポジトリルート、Unity プロジェクトは `src/AddressableManager/` と階層がずれている。パスを書くときは起点を取り違えない
 - **「Docs」が2箇所ある**：リポジトリルートの `Docs/`（利用者向け：使い方・用語集・リリースノート）と `src/AddressableManager/Docs/`（設計仕様書・コーディング規則・機能仕様書・図）は別フォルダ。設計仕様書・conventions・機能ごとの詳細を探すときは後者

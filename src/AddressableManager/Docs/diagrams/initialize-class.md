@@ -31,12 +31,12 @@ classDiagram
         -_stateModel : InitializeStateModel
         -_service : IAddressablesInitializeService
         -_disposeCts : CancellationTokenSource
-        -_sharedSource : TaskCompletionSource
+        -_sharedSource : SharedCompletion
         +AccState : InitializeState
         +AccIsInitialized : bool
         ~OnSucceeded : event Action
         ~OnFailed : event Action~AddressableInitializeException~
-        +InitializeAsync(progress, ct) Task
+        +InitializeAsync(progress, ct) UniTask/Awaitable
         +StartAutoInitialize()
         +Tick(deltaTime)
         +Dispose()
@@ -44,11 +44,11 @@ classDiagram
     class InitializeStateModel {
         -_state : InitializeState
         -_failure : AddressableInitializeException
-        -_sharedTask : Task
+        -_sharedTask : SharedCompletion
         -_progressTargets : List~IProgress~
         +AccState : InitializeState
         +AccFailure : AddressableInitializeException
-        +AccSharedTask : Task
+        +AccSharedTask : SharedCompletion
         +MarkRunning(task)
         +MarkSucceeded()
         +MarkFailed(exception)
@@ -59,11 +59,11 @@ classDiagram
     class IInitializationGate {
         <<interface>>
         +AccIsOpen : bool
-        +WaitUntilOpenAsync(ct) Task
+        +WaitUntilOpenAsync(ct) UniTask/Awaitable
     }
     class IAddressablesInitializeService {
         <<interface>>
-        +StartInitialize(autoReleaseHandle) Task
+        +StartInitialize(autoReleaseHandle) UniTask/Awaitable
         +GetPercentComplete() float
         +ReleaseHandle()
     }

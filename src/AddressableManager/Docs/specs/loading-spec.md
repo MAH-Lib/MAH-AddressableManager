@@ -179,7 +179,7 @@ internal sealed class LoadingController : IDisposable
 #if ADDRESSABLE_UNITASK_SUPPORT
     internal async UniTask<AssetTicket<T>> LoadAsync<T>(AssetKey key, AssetLifetime lifetime, CancellationToken ct = default)
 #else
-    internal async Task<AssetTicket<T>> LoadAsync<T>(AssetKey key, AssetLifetime lifetime, CancellationToken ct = default)
+    internal async Awaitable<AssetTicket<T>> LoadAsync<T>(AssetKey key, AssetLifetime lifetime, CancellationToken ct = default)
 #endif
         where T : UnityEngine.Object
     {
@@ -202,7 +202,7 @@ internal sealed class LoadingController : IDisposable
 
         try
         {
-            await entry.AccLoadTask.WithCancellation(ct); // 共有ロードタスクは常にTask。6章参照
+            await entry.AccLoadTask.Wait(ct); // 共有完了を待ち手ごとに待つ。6.2参照（API は実装時に確定する）
             if (!_tickets.Contains(serial))
                 throw new OperationCanceledException("ロード中に寿命が終了しました");
         }
@@ -539,7 +539,7 @@ internal sealed class LoadingController
 - Worker の生成は `IAssetLoaderServiceFactory` 経由にする。EditMode テストで偽の Worker に差し替えるため
 - リトライ回数・待機時間は `AddressableLoadingSettings`（Runtime SO が保持。9章）で設定する。リトライの待機は `AsyncCompat.Delay` で、ポーズ中（`timeScale = 0`）も実時間で待つ（6.2）。リトライを使い切ったら `AssetLoadException`（`AssetKey` を持ち、最後の例外を `InnerException` に入れる）を投げる
 - **回復の見込みがない失敗は、リトライせずに即座に `AssetLoadException` にする**。例外（とその `InnerException`）に `InvalidKeyException`（アドレスの書き間違い）を含む場合が対象で、待ってもやり直しても結果が変わらず、既定の設定（3回・1000ms 間隔）では、エラーが出るまで約2秒待たされるため。それ以外の例外（ネットワーク等の一時的な失敗を含む）は、従来どおりリトライする
-- **ロード中に `Dispose` された Worker は、完了後に自分で handle を解放して、`OperationCanceledException` で抜ける**。`Dispose()` は、handle の完了待ちの間（`_isLoading`）は handle を解放せず、破棄済みの印（`_isDisposed`）だけを付ける。`LoadAsync` は、各試行の開始時・await の直後・リトライ待機の直前で、破棄済みなら `OperationCanceledException` を投げる。try の中で投げた分は、既存のキャンセル経路（`catch (OperationCanceledException)` → `ReleaseHandle`）が handle を解放する。ここで即座に解放すると、再開した `LoadAsync` が失敗とみなしてリトライし、新しい handle を作って、誰も解放しないままリークする（Manager の破棄で、ロード中の Worker が `Dispose` される場合）。キャンセル扱いにするのは、共有ロードタスクを Faulted にせず、未観測の例外を出さないため。2回目以降の `Dispose` は何もしない
+- **ロード中に `Dispose` された Worker は、完了後に自分で handle を解放して、`OperationCanceledException` で抜ける**。`Dispose()` は、handle の完了待ちの間（`_isLoading`）は handle を解放せず、破棄済みの印（`_isDisposed`）だけを付ける。`LoadAsync` は、各試行の開始時・await の直後・リトライ待機の直前で、破棄済みなら `OperationCanceledException` を投げる。try の中で投げた分は、既存のキャンセル経路（`catch (OperationCanceledException)` → `ReleaseHandle`）が handle を解放する。ここで即座に解放すると、再開した `LoadAsync` が失敗とみなしてリトライし、新しい handle を作って、誰も解放しないままリークする（Manager の破棄で、ロード中の Worker が `Dispose` される場合）。キャンセル扱いにするのは、ロードの共有完了を失敗にしないため。2回目以降の `Dispose` は何もしない
 
 ```csharp
 internal interface IAssetLoaderWorker : IDisposable
@@ -547,7 +547,7 @@ internal interface IAssetLoaderWorker : IDisposable
 #if ADDRESSABLE_UNITASK_SUPPORT
     UniTask LoadAsync(CancellationToken token);
 #else
-    Task LoadAsync(CancellationToken token);
+    Awaitable LoadAsync(CancellationToken token);
 #endif
     UnityEngine.Object AccAsset { get; }
     Type AccAssetType { get; }
@@ -576,84 +576,34 @@ internal interface IAssetLoaderServiceFactory
 
 複数アセットを扱う `AddressableMultiLoaderBase<T>` は移植しない（重複判定と RefCount 管理が Controller と役割が重なるため）。Label 一括ロードは、Controller が1件ずつの Load を組み合わせて行う（13章）。
 
-### 6.2 非同期実装の切り替え（UniTask が正、無ければ Task）
+### 6.2 非同期実装の切り替え（UniTask が正、無ければ Awaitable）
 
-方針と理由は設計仕様書 3.5.1 を正とする。ここでは Loading での実装に関わる点だけを書く。
+方針と理由は設計仕様書 3.5.1 を正とする。ここでは Loading での実装に関わる点だけを書く。**`AsyncCompat` と `SharedCompletion`（名前は暫定）の具体的なコード・API は実装時に確定する。**
 
 - **正（UniTask 導入時）**：コンパイルシンボル `ADDRESSABLE_UNITASK_SUPPORT` が定義され、`UniTask` / `UniTask<T>` を使う
-- **UniTask が無い場合の代替**：`System.Threading.Tasks.Task` / `Task<T>`
-- 切り替えは `#if` によるシグネチャの出し分けで行う（`#if` 側に UniTask 版、`#else` 側に Task 版）。呼び出し側は `await` で使う限り違いを意識しない
-- **共有ロードタスク（`AssetEntryModel.AccLoadTask`）は、安全性を優先して UniTask 導入時も `Task` で持つ**。重複ロードの呼び出し元・Label 一括ロード・Worker の後始末が同時に待ち、Entry の存続中は完了後にも後から来た Load が待つため。`Task` は何度 `await` しても安全だが、`async UniTask` の戻り値は2回目の `await` で例外になるか、プールで再利用された別の処理の状態を読む恐れがある
-- UniTask にするのは、1回だけ `await` される経路（公開 API の戻り値、`LoadingController.LoadAsync` / `LoadByLabelAsync`、Worker の `LoadAsync`、`LabelLocationService.ResolveAsync`）である
+- **UniTask が無い場合の代替**：`UnityEngine.Awaitable` / `Awaitable<T>`。`Task` は使わない
+- 切り替えは `#if` によるシグネチャの出し分けで行う（`#if` 側に UniTask 版、`#else` 側に Awaitable 版）。呼び出し側は `await` で使う限り違いを意識しない
+- **ロードの共有（`AssetEntryModel.AccLoadTask`）は、`await` できる値ではなく共有完了で持つ**。重複ロードの呼び出し元・Label 一括ロード・Worker の後始末が同時に待ち、Entry の存続中は完了後にも後から来た Load が待つが、UniTask / Awaitable は1回しか `await` できないため
+- UniTask / Awaitable をそのまま使うのは、1回だけ `await` される経路（公開 API の戻り値、`LoadingController.LoadAsync` / `LoadByLabelAsync`、Worker の `LoadAsync`、`LabelLocationService.ResolveAsync`）である
 
 | 区分 | UniTask 導入時 | UniTask が無い場合 |
 |---|---|---|
-| 公開 API・Controller の `LoadAsync` / `LoadByLabelAsync` | `UniTask<T>` | `Task<T>` |
-| Worker の `LoadAsync`・`ILabelLocationService.ResolveAsync` | `UniTask` | `Task` |
-| 共有ロードタスク `AccLoadTask`・Label の待機（`WaitAllOrFirstFault`） | `Task` | `Task` |
-| リトライの待機（`AsyncCompat.Delay`） | `UniTask.Delay(ignoreTimeScale: true)` | `Task.Delay` |
+| 公開 API・Controller の `LoadAsync` / `LoadByLabelAsync` | `UniTask<T>` | `Awaitable<T>` |
+| Worker の `LoadAsync`・`ILabelLocationService.ResolveAsync` | `UniTask` | `Awaitable` |
+| ロードの共有 `AccLoadTask`・Label の待機（`WaitAllOrFirstFault`） | 共有完了 | 共有完了 |
+| リトライの待機（`AsyncCompat.Delay`） | `UniTask.Delay(ignoreTimeScale: true)` | 実時間で待つ実装（実装時に確定） |
 
-#### キャンセル付き待機のヘルパー
+#### キャンセル付き待機
 
-共有ロードタスクはシンボルに関係なく `Task` のため、**`Task` 版の `WithCancellation` は常にコンパイルする**。UniTask 版は、1回だけ待つ UniTask に使う。`AssetEntryModel.AccLoadTask` は結果を持たない型のため、非ジェネリック版を用意する。
+- 1回だけ待つ値には `AsyncCompat.WithCancellation` を使う
+- 共有完了の待機は、待ち手ごとに `ct` を受け取る。キャンセルで止まるのは呼び出し元の待機だけであり、実ロードは止めない（他の呼び出し元と共有しているため）
+- `ct` の登録には `static` にキャッシュした delegate を使い、状態は引数で渡す（11章）
 
-```csharp
-internal static class AsyncCompat
-{
-#if ADDRESSABLE_UNITASK_SUPPORT
-    internal static UniTask WithCancellation(this UniTask task, CancellationToken ct)
-        => task.AttachExternalCancellation(ct);
-    internal static UniTask<T> WithCancellation<T>(this UniTask<T> task, CancellationToken ct)
-        => task.AttachExternalCancellation(ct);
-    // timeScale = 0（ポーズ中）でも待機が終わるよう、実時間で待つ
-    internal static UniTask Delay(int milliseconds, CancellationToken ct)
-        => UniTask.Delay(milliseconds, ignoreTimeScale: true, cancellationToken: ct);
-#else
-    internal static async Task<T> WithCancellation<T>(this Task<T> task, CancellationToken ct) { /* 下と同様 */ }
-    internal static Task Delay(int milliseconds, CancellationToken ct) => Task.Delay(milliseconds, ct);
-#endif
+時間待ちは必ず `AsyncCompat.Delay` を通す。`UniTask.Delay` を直接呼ぶと、既定では `Time.timeScale` の影響を受け、ポーズ中に失敗したロードのリトライ待機が終わらなくなる。Awaitable 版も、`Time.timeScale` の影響を受けない形で実装する。
 
-    // 共有ロードタスク用。シンボルに関係なく常にコンパイルする
-    internal static async Task WithCancellation(this Task task, CancellationToken ct)
-    {
-        if (!ct.CanBeCanceled) { await task; return; }
-        var tcs = new TaskCompletionSource<bool>();
-        using (ct.Register(CANCEL_WAIT, tcs)) // static にキャッシュした delegate に状態を渡す（11章）
-        {
-            if (task != await Task.WhenAny(task, tcs.Task))
-                throw new OperationCanceledException(ct);
-        }
-        await task; // 失敗時の例外をそのまま伝える
-    }
-}
-```
+#### AsyncOperationHandle からのブリッジ
 
-キャンセルで止まるのは呼び出し元の待機だけであり、実ロードは止めない（他の呼び出し元と共有しているため）。
-
-時間待ちは必ず `AsyncCompat.Delay` を通す。`UniTask.Delay` を直接呼ぶと、既定では `Time.timeScale` の影響を受け、ポーズ中に失敗したロードのリトライ待機が終わらなくなる。
-
-#### AsyncOperationHandle からのブリッジ（Task 版）
-
-`AsyncOperationHandle.Completed` イベントを `TaskCompletionSource<T>` で待ち受けてブリッジする（UniTask 版は `handle.ToUniTask()` を使う）。
-
-```csharp
-internal static Task<T> ToTask<T>(this AsyncOperationHandle<T> handle)
-{
-    var tcs = new TaskCompletionSource<T>();
-    if (handle.IsDone) { SetResult(tcs, handle); return tcs.Task; }
-    handle.Completed += h => SetResult(tcs, h);
-    return tcs.Task;
-}
-
-// 成功時は結果を、失敗時は OperationException を伝える
-private static void SetResult<T>(TaskCompletionSource<T> tcs, AsyncOperationHandle<T> handle)
-{
-    if (handle.Status == AsyncOperationStatus.Succeeded)
-        tcs.TrySetResult(handle.Result);
-    else
-        tcs.TrySetException(handle.OperationException ?? new Exception("Addressables のロードに失敗しました"));
-}
-```
+UniTask 版は `handle.ToUniTask()` を使う。Awaitable 版は、`AsyncOperationHandle.Completed` イベントを `AwaitableCompletionSource<T>` で待ち受けてブリッジする。成功時は結果を、失敗時は `OperationException` を伝え、呼んだ時点で完了済み（`IsDone`）ならその場で結果を返す。
 
 ## 7. Model
 
@@ -732,7 +682,7 @@ internal sealed class AssetEntryModel
     internal AssetEntryKey AccEntryKey { get; } // Registry の判定キー
     internal IAssetLoaderWorker AccWorker { get; }
     internal Type AccAssetType { get; }
-    internal Task AccLoadTask { get; private set; } // 複数の呼び出し元が待つため、UniTask導入時も常にTask（6.2参照）
+    internal SharedCompletion AccLoadTask { get; private set; } // 複数の呼び出し元が待つため、共有完了で持つ（6.2参照。名前は実装時に見直す）
     internal int AccRefCount { get; private set; }
 }
 ```
@@ -750,13 +700,13 @@ internal sealed class AssetEntryModel
 public interface IAddressableHandler
 {
     // 初期化のメンバーは initialize-spec.md 4章。ここでは読み込み・解放のメンバーを示す
-    // 非同期型(Task/UniTask)の切り替え方針は6.2参照
-    Task<AssetTicket<T>> LoadAsync<T>(AssetKey key, AssetLifetime lifetime, CancellationToken ct = default)
+    // UniTask 版を示す。非同期型(UniTask/Awaitable)の切り替え方針は6.2参照
+    UniTask<AssetTicket<T>> LoadAsync<T>(AssetKey key, AssetLifetime lifetime, CancellationToken ct = default)
         where T : UnityEngine.Object;
     void Release<T>(AssetTicket<T> ticket) where T : UnityEngine.Object;
 
     // Label 一括ロード（13章）。Load 時に型は指定しない。型は AssetGroupTicket から取り出すときに指定する
-    Task<AssetGroupTicket> LoadByLabelAsync(string label, AssetLifetime lifetime, CancellationToken ct = default);
+    UniTask<AssetGroupTicket> LoadByLabelAsync(string label, AssetLifetime lifetime, CancellationToken ct = default);
     void Release(AssetGroupTicket ticket);
 }
 ```
@@ -841,7 +791,7 @@ internal sealed class AddressableLoadingSettings
 - `ReleaseLifetime` の一時退避には `_releaseTargetBuffer`（`List<long>`）を使い、`ToArray()` / `ToList()` は使わない。フィールドに保持して `Clear()` で使い回す
 - Watcher へのコールバックはフィールドにキャッシュした delegate（`_onOwnerDestroyed`）を使い、ラムダを毎回生成しない
 - `AssetLifetimeWatcher.OnDestroy` は、`ToArray()` を使わず、`_scopes` を末尾から1件ずつ取り除きながら通知する（大量の GameObject の同時破棄で、件数分の配列が確保されるのを避ける）
-- `AsyncCompat.WithCancellation` の `CancellationToken.Register` は、`static` にキャッシュした delegate（`CANCEL_WAIT`）に状態（`TaskCompletionSource`）を引数で渡し、クロージャを毎回生成しない
+- キャンセル付き待機の `CancellationToken.Register` は、`static` にキャッシュした delegate に状態を引数で渡し、クロージャを毎回生成しない
 - `Dictionary` は具体型のまま `foreach` する（`IEnumerable` にアップキャストするとボックス化する）
 - `Tick` の先頭で owner 登録数が0件なら即リターンする（owner 寿命を使わないプロジェクトでは実質何も走らない）
 - Label 一括ロードのロケーションのバッファ（`List<LabelLocation>`）は、`await` をまたぐため、上記の使い回しバッファとは違い**呼び出しごとに確保する**。フィールドで使い回すと、並行する `LoadByLabelAsync` の間で中身が混ざる（13.9）
@@ -875,19 +825,19 @@ Label を指定して、その Label が付いたアセットをまとめて読�
 3. `await` の後で、もう一度破棄済みを確認する（`ObjectDisposedException`）。組が0件なら、警告ログを出し、空の `AssetGroupTicket` を返す
 4. 寿命を `LifetimeScopeId` に解決する
 5. **確保（同期）**：全件について、3.1の手順4〜5（エントリの取得または作成・RefCount の加算・チケットの登録）を行う。ここまで `await` を挟まないため、全件の通し番号がこの時点でそろう。record には、まとめチケットへの参照を持たせる
-6. **待機**：全件の `AccLoadTask` を、最初の失敗で打ち切る形で待つ（下記）。`AsyncCompat.WithCancellation` で ct を付ける
+6. **待機**：全件の `AccLoadTask`（共有完了）を、最初の失敗で打ち切る形で待つ（下記）。待機には ct を渡す
 7. 失敗・キャンセル・寿命の終了のいずれかが起きたら、全件の通し番号を巻き戻して（`ReleaseBySerial`）例外を投げる（13.10）。残りのロードは待たない。ロード中のエントリは、RefCount が 0 になると Registry から外れ、Worker はロード完了後に `DisposeWorkerWhenCompleted` が解放する
 8. 全件が成功したら、まとめチケットに中身（アドレス・型・アセット・通し番号）を詰め、全通し番号に受け渡し済みの印を立てて（`MarkDelivered`。`await` を挟まない）返す
 
-「確保」と「待機」を分けるのは、失敗の時点で全件の通し番号がわかっていて、残りを待たずにすぐ巻き戻せるようにするため。共有ロードタスクは常に `Task` なので、待機は `Task` で統一でき、`#if` の出し分けも増えない。
+「確保」と「待機」を分けるのは、失敗の時点で全件の通し番号がわかっていて、残りを待たずにすぐ巻き戻せるようにするため。待機は共有完了の完了通知で作るため、`#if` の出し分けは増えない。
 
-**待機に `Task.WhenAll` は使わない**。`Task.WhenAll` は全件の完了を待つため、1件が失敗しても、最も遅いロードが終わるまで待ち続けてしまう。`AsyncCompat` に、全件の完了、または最初の失敗で完了する `Task` を返すヘルパー（`WaitAllOrFirstFault`）を置く。
+**全件の完了を待つ形にしない**。全件の完了を待つと、1件が失敗しても、最も遅いロードが終わるまで待ち続けてしまう。`AsyncCompat` に、全件の完了、または最初の失敗で完了するヘルパー（`WaitAllOrFirstFault`）を置く。複数の共有完了の完了通知をカウンタで受ける形にする（具体的な API は実装時に確定する）。
 
 ```csharp
 #if ADDRESSABLE_UNITASK_SUPPORT
 internal async UniTask<AssetGroupTicket> LoadByLabelAsync(string label, AssetLifetime lifetime, CancellationToken ct = default)
 #else
-internal async Task<AssetGroupTicket> LoadByLabelAsync(string label, AssetLifetime lifetime, CancellationToken ct = default)
+internal async Awaitable<AssetGroupTicket> LoadByLabelAsync(string label, AssetLifetime lifetime, CancellationToken ct = default)
 #endif
 {
     ThrowIfDisposed();
@@ -915,7 +865,7 @@ internal async Task<AssetGroupTicket> LoadByLabelAsync(string label, AssetLifeti
     var asset_types = new Type[locations.Count];
     var entries = new AssetEntryModel[locations.Count]; // 待機の後に、読み込んだアセットを取り出すために持つ
     var serials = new long[locations.Count];
-    var tasks = new System.Threading.Tasks.Task[locations.Count]; // 共有ロードタスクは常に Task（UniTask 版では using が無いため完全修飾で書く）
+    var completions = new SharedCompletion[locations.Count]; // 全件の共有完了を、最初の失敗で打ち切って待つ（6.2）
     var reserved = 0; // 確保が済んだ件数。途中で例外が出ても、確保済みの分だけを巻き戻す
     try
     {
@@ -930,11 +880,11 @@ internal async Task<AssetGroupTicket> LoadByLabelAsync(string label, AssetLifeti
             asset_types[reserved] = entry_key.AccAssetType;
             entries[reserved] = entry;
             serials[reserved] = RegisterTicket(entry, entry_key, scope_id, group);
-            tasks[reserved] = entry.AccLoadTask;
+            completions[reserved] = entry.AccLoadTask;
         }
 
-        // 待機：最初の失敗で打ち切る（Task.WhenAll は全件の完了を待つため使わない）
-        await AsyncCompat.WaitAllOrFirstFault(tasks).WithCancellation(ct);
+        // 待機：最初の失敗で打ち切る（全件の完了を待つ形にしない）。API は実装時に確定する
+        await AsyncCompat.WaitAllOrFirstFault(completions, ct);
         if (!ContainsAll(serials, reserved))
             throw new OperationCanceledException("ロード中に寿命が終了しました");
     }
@@ -1021,8 +971,8 @@ Service 層。Label のロケーションを、**型を絞らずに**取得す�
 ```csharp
 internal interface ILabelLocationService
 {
-    // 非同期型(Task/UniTask)の切り替え方針は6.2参照
-    Task ResolveAsync(string label, List<LabelLocation> result, CancellationToken ct);
+    // UniTask 版を示す。非同期型(UniTask/Awaitable)の切り替え方針は6.2参照
+    UniTask ResolveAsync(string label, List<LabelLocation> result, CancellationToken ct);
 }
 
 internal readonly struct LabelLocation

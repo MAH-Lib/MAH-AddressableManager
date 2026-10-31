@@ -40,7 +40,7 @@ classDiagram
     class IInitializationGate {
         <<interface>>
         +AccIsOpen : bool
-        +WaitUntilOpenAsync(ct) Task
+        +WaitUntilOpenAsync(ct) UniTask/Awaitable
     }
     class AssetRegistryModel {
         +TryGetEntry(entryKey)

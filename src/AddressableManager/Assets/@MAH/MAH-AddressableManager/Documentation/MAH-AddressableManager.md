@@ -10,7 +10,7 @@ This page is a short offline summary. The full usage guide and the latest inform
 | --- | --- |
 | Unity | 6000.0 or later (tested with 6000.3.26f1) |
 | Addressables | 2.9.0 or later (tested with 2.10.3) |
-| UniTask (optional) | Install it via UPM to use the UniTask version. Without it, `Task` is used |
+| UniTask (optional) | Install it via UPM to use the UniTask version. Without it, `Awaitable` is used |
 
 ## Quick start
 
